@@ -117,12 +117,12 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
         anyhow::bail!("{} rule(s) failed", failures.len());
     }
 
-    // Persist env hashes so a future run can detect changes.
+    // Persist env values so a future run can detect changes.
     if !cfg.env.is_empty() {
         let mut lf = lock_file.write().unwrap();
         for var in &cfg.env {
-            if let Some(h) = hash::hash_env(var) {
-                lf.insert(hash::env_key(var), h);
+            if let Ok(val) = std::env::var(var) {
+                lf.insert(hash::env_key(var), val);
             }
         }
         hash::write_lock_file(&lf).context("failed to write lock file")?;

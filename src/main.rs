@@ -113,12 +113,24 @@ fn cmd_why(target_name: &str) -> Result<()> {
     if !bf.config.env.is_empty() {
         println!("  env:");
         for var in &bf.config.env {
-            let status = if hash::env_is_dirty(&lf, var) { "CHANGED" } else { "clean" };
-            let display = match std::env::var(var) {
-                Ok(val) => format!("{var}={val}"),
-                Err(_)  => format!("{var} (unset)"),
+            let current = std::env::var(var).ok();
+            let stored  = hash::env_stored_value(&lf, var);
+            let dirty   = current.as_deref() != stored;
+
+            let current_display = match &current {
+                Some(v) => format!("{var}={v}"),
+                None    => format!("{var} (unset)"),
             };
-            println!("    {display}  {status}");
+
+            if dirty {
+                let was = match stored {
+                    Some(v) => format!("was: {v}"),
+                    None    => "was: unset".to_string(),
+                };
+                println!("    {current_display}  CHANGED ({was})");
+            } else {
+                println!("    {current_display}  clean");
+            }
         }
     }
 
