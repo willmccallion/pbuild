@@ -7,36 +7,56 @@ use pbuild::{
     graph::build_plan,
 };
 
-fn run() -> Result<()> {
-    let mut args = std::env::args().skip(1).peekable();
+struct Args {
+    jobs: usize,
+    dry_run: bool,
+    verbose: bool,
+    list: bool,
+    target: Option<String>,
+}
 
-    let mut jobs: usize = std::thread::available_parallelism()
-        .map(std::num::NonZero::get)
-        .unwrap_or(4);
-    let mut dry_run = false;
-    let mut verbose = false;
-    let mut list = false;
-    let mut target_arg: Option<String> = None;
+impl Default for Args {
+    fn default() -> Self {
+        Args {
+            jobs: std::thread::available_parallelism()
+                .map(std::num::NonZero::get)
+                .unwrap_or(4),
+            dry_run: false,
+            verbose: false,
+            list: false,
+            target: None,
+        }
+    }
+}
 
-    while let Some(arg) = args.next() {
+fn parse_args() -> Result<Args> {
+    let mut raw = std::env::args().skip(1).peekable();
+    let mut args = Args::default();
+
+    while let Some(arg) = raw.next() {
         match arg.as_str() {
-            "-n" | "--dry-run" => dry_run = true,
-            "-v" | "--verbose" => verbose = true,
-            "-l" | "--list" => list = true,
-            "-j" | "--jobs" => {
-                let val = args.next().ok_or_else(|| anyhow::anyhow!("-j requires a value"))?;
-                jobs = val.parse().context("-j requires a positive integer")?;
+            "-n" | "--dry-run" => args.dry_run = true,
+            "-v" | "--verbose" => args.verbose = true,
+            "-l" | "--list"   => args.list = true,
+            "-j" | "--jobs"   => {
+                let val = raw.next().ok_or_else(|| anyhow::anyhow!("-j requires a value"))?;
+                args.jobs = val.parse().context("-j requires a positive integer")?;
             }
             a if a.starts_with("-j") => {
-                jobs = a[2..].parse().context("-j requires a positive integer")?;
+                args.jobs = a[2..].parse().context("-j requires a positive integer")?;
             }
-            _ => target_arg = Some(arg),
+            _ => args.target = Some(arg),
         }
     }
 
+    Ok(args)
+}
+
+fn run() -> Result<()> {
+    let args = parse_args()?;
     let bf = load_build_file()?;
 
-    if list {
+    if args.list {
         let mut names: Vec<&str> = bf.rules.keys().map(String::as_str).collect();
         names.sort_unstable();
         for name in names {
@@ -50,11 +70,11 @@ fn run() -> Result<()> {
     }
 
     let rules = to_rules(&bf)?;
-    let root = resolve_target(&bf, target_arg.as_deref())?;
+    let root = resolve_target(&bf, args.target.as_deref())?;
     let plan = build_plan(&rules, &root)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let cfg = Config { jobs, dry_run, verbose };
+    let cfg = Config { jobs: args.jobs, dry_run: args.dry_run, verbose: args.verbose };
     execute_plan(&cfg, &plan)?;
 
     Ok(())
