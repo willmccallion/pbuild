@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use anyhow::{Context, Result};
 use rayon::ThreadPoolBuilder;
@@ -46,10 +46,9 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
         .build()
         .context("failed to build thread pool")?;
 
-    // Shared state — both protected by a single Mutex for simplicity.
-    // The engine spends almost all its time in subprocesses, so lock
-    // contention on these tiny maps is negligible.
-    let lock_file: Arc<Mutex<LockFile>> = Arc::new(Mutex::new(hash::read_lock_file()?));
+    // lock_file: read-heavy (dirty checks), write-rare (after each rule succeeds).
+    // rebuilt: written after each rule, read when checking dep cascade.
+    let lock_file: Arc<RwLock<LockFile>> = Arc::new(RwLock::new(hash::read_lock_file()?));
     let rebuilt: Arc<Mutex<HashSet<Target>>> = Arc::new(Mutex::new(HashSet::new()));
 
     // The plan is already topologically sorted (leaves first).
@@ -73,7 +72,7 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
         let results: Vec<Result<()>> = pool.install(|| {
             ready
                 .par_iter()
-                .map(|rule| run_rule(cfg, &lock_file, &rebuilt, rule))
+                .map(|rule| run_rule(cfg, &*lock_file, &*rebuilt, rule))
                 .collect()
         });
 
@@ -83,6 +82,10 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
             done.insert(rule.target.clone());
         }
 
+        // Flush lock file once per wave rather than after every rule.
+        hash::write_lock_file(&lock_file.read().unwrap())
+            .context("failed to write lock file")?;
+
         remaining = not_ready;
     }
 
@@ -91,7 +94,7 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
 
 fn run_rule(
     cfg: &Config,
-    lock_file: &Mutex<LockFile>,
+    lock_file: &RwLock<LockFile>,
     rebuilt: &Mutex<HashSet<Target>>,
     rule: &Rule,
 ) -> Result<()> {
@@ -116,7 +119,8 @@ fn run_rule(
     println!("+ {}", rule.command.join(" "));
     run_command(&rule.command)?;
 
-    // Hash inputs + output and flush lock file.
+    // Hash inputs + output and update the in-memory lock file.
+    // The wave loop flushes it to disk once after all rules in the wave finish.
     let paths_to_hash: Vec<&str> = rule
         .inputs
         .iter()
@@ -125,11 +129,12 @@ fn run_rule(
         .filter(|s| !s.is_empty())
         .collect();
 
-    for path in paths_to_hash {
-        if let Some(h) = hash::hash_file(path)? {
-            let mut lf = lock_file.lock().unwrap();
-            lf.insert(path.to_string(), h);
-            hash::write_lock_file(&lf)?;
+    {
+        let mut lf = lock_file.write().unwrap();
+        for path in paths_to_hash {
+            if let Some(h) = hash::hash_file(path)? {
+                lf.insert(path.to_string(), h);
+            }
         }
     }
 
@@ -140,11 +145,11 @@ fn run_rule(
 
 /// True if any of the given files are dirty relative to the lock file.
 /// No declared inputs → always run (returns true).
-fn any_dirty(lock_file: &Mutex<LockFile>, inputs: &[String]) -> Result<bool> {
+fn any_dirty(lock_file: &RwLock<LockFile>, inputs: &[String]) -> Result<bool> {
     if inputs.is_empty() {
         return Ok(true);
     }
-    let lf = lock_file.lock().unwrap();
+    let lf = lock_file.read().unwrap();
     for path in inputs {
         if hash::is_dirty(&lf, path)? {
             return Ok(true);

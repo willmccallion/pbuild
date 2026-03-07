@@ -15,14 +15,18 @@ use crate::types::{Rule, Target};
 /// inputs  = ["main.o"]
 /// output  = "app"
 ///
-/// [rules.main.o]
+/// [rules."main.o"]
 /// command = ["cc", "-c", "main.c", "-o", "main.o"]
 /// inputs  = ["main.c"]
 /// output  = "main.o"
+///
+/// [rules.clean]
+/// type    = "task"
+/// command = ["rm", "-f", "main.o", "app"]
 /// ```
 ///
-/// Rule keys that contain a `/` are treated as `File` targets;
-/// everything else is a `Task`.
+/// Rules default to `type = "file"`. Set `type = "task"` for phony targets
+/// that should always run and are never hashed.
 #[derive(Debug, Deserialize)]
 pub struct BuildFile {
     /// Optional default target name to build when none is specified on the CLI.
@@ -31,8 +35,23 @@ pub struct BuildFile {
     pub rules: HashMap<String, RawRule>,
 }
 
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RawTargetType {
+    File,
+    Task,
+}
+
+impl Default for RawTargetType {
+    fn default() -> Self {
+        RawTargetType::File
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RawRule {
+    #[serde(rename = "type", default)]
+    pub kind: RawTargetType,
     pub command: Vec<String>,
     #[serde(default)]
     pub deps: Vec<String>,
@@ -54,8 +73,8 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
     bf.rules
         .iter()
         .map(|(name, raw)| {
-            let target = parse_target(name);
-            let deps = raw.deps.iter().map(|d| parse_target(d)).collect();
+            let target = rule_target(name, raw);
+            let deps = raw.deps.iter().map(|d| resolve_dep(bf, d)).collect();
             Ok(Rule {
                 target,
                 deps,
@@ -70,28 +89,44 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
 /// Resolve the default or requested target name to a `Target`.
 pub fn resolve_target(bf: &BuildFile, name: Option<&str>) -> Result<Target> {
     match name {
-        Some(n) => Ok(parse_target(n)),
+        Some(n) => match bf.rules.get(n) {
+            Some(raw) => Ok(rule_target(n, raw)),
+            None => bail!("no rule for target: {n}"),
+        },
         None => match &bf.default {
-            Some(d) => Ok(parse_target(d)),
+            Some(d) => match bf.rules.get(d.as_str()) {
+                Some(raw) => Ok(rule_target(d, raw)),
+                None => bail!("default target `{d}` has no rule"),
+            },
             None => {
-                // Fall back to the only rule if there's exactly one.
                 if bf.rules.len() == 1 {
-                    Ok(parse_target(bf.rules.keys().next().unwrap()))
+                    let (name, raw) = bf.rules.iter().next().unwrap();
+                    Ok(rule_target(name, raw))
                 } else {
-                    bail!("no default target specified and multiple rules exist;\
-                           pass a target name on the command line")
+                    bail!(
+                        "no default target specified and multiple rules exist; \
+                         pass a target name on the command line"
+                    )
                 }
             }
         },
     }
 }
 
-/// A target key that looks like a file path (contains `/` or `.`) becomes
-/// `Target::File`; otherwise it's `Target::Task`.
-fn parse_target(s: &str) -> Target {
-    if s.contains('/') || s.contains('.') {
-        Target::File(s.to_string())
-    } else {
-        Target::Task(s.to_string())
+/// Build a `Target` from a rule's key and its explicit `type` field.
+fn rule_target(name: &str, raw: &RawRule) -> Target {
+    match raw.kind {
+        RawTargetType::Task => Target::Task(name.to_string()),
+        RawTargetType::File => Target::File(name.to_string()),
+    }
+}
+
+/// Resolve a dependency string to a `Target` by looking it up in the build file.
+/// Falls back to `File` if the name isn't a known rule key (e.g. a source file
+/// listed as a dep directly).
+fn resolve_dep(bf: &BuildFile, name: &str) -> Target {
+    match bf.rules.get(name) {
+        Some(raw) => rule_target(name, raw),
+        None => Target::File(name.to_string()),
     }
 }
