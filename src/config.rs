@@ -56,6 +56,7 @@ fn expand_globs(patterns: &[String]) -> Result<Vec<String>> {
 /// that should always run and are never hashed.
 pub struct BuildFile {
     pub config: BuildConfig,
+    pub ui: crate::ui::UiConfig,
     /// Variable definitions from `[vars]`. Used for `{{name}}` interpolation.
     pub vars: HashMap<String, String>,
     pub rules: HashMap<String, RawRule>,
@@ -141,6 +142,16 @@ pub struct RawRule {
     pub group: Option<String>,
 }
 
+fn parse_ui_config(table: &mut toml::Table) -> Result<crate::ui::UiConfig> {
+    let Some(val) = table.remove("ui") else {
+        return Ok(crate::ui::UiConfig { color: None, prefix: None });
+    };
+    let t: toml::Table = val.try_into().context("invalid [ui] section")?;
+    let color = t.get("color").and_then(|v| v.as_bool());
+    let prefix = t.get("prefix").and_then(|v| v.as_str()).map(ToString::to_string);
+    Ok(crate::ui::UiConfig { color, prefix })
+}
+
 /// Parse `pbuild.toml` from the current directory.
 ///
 /// The file is a flat TOML table where `[config]` holds build metadata and
@@ -154,6 +165,8 @@ pub fn load_build_file() -> Result<BuildFile> {
         Some(v) => v.try_into().context("invalid [config] section")?,
         None => BuildConfig::default(),
     };
+
+    let ui = parse_ui_config(&mut table)?;
 
     let vars: HashMap<String, String> = match table.remove("vars") {
         Some(v) => v.try_into().context("invalid [vars] section")?,
@@ -172,6 +185,7 @@ pub fn load_build_file() -> Result<BuildFile> {
 
     Ok(BuildFile {
         config,
+        ui,
         vars,
         rules,
     })

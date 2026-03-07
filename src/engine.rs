@@ -10,19 +10,21 @@ use crate::depfile;
 use crate::hash::{self, LockFile};
 use crate::process::run_command;
 use crate::types::{Rule, Target};
-use crate::ui;
+use crate::ui::UiConfig;
 
 pub struct Config {
     /// Max concurrent rules.
     pub jobs: usize,
     /// Print commands without executing them.
     pub dry_run: bool,
-    /// Print [skip] lines and extra info.
+    /// Print skip lines and extra info.
     pub verbose: bool,
     /// Keep building independent rules after a failure.
     pub keep_going: bool,
     /// Environment variables that trigger a full rebuild when changed.
     pub env: Vec<String>,
+    /// Terminal output settings.
+    pub ui: UiConfig,
 }
 
 impl Default for Config {
@@ -33,6 +35,7 @@ impl Default for Config {
             verbose: false,
             keep_going: false,
             env: Vec::new(),
+            ui: UiConfig { color: None, prefix: None },
         }
     }
 }
@@ -66,7 +69,7 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
         cfg.env.iter().any(|var| hash::env_is_dirty(&lf, var))
     };
     if env_dirty && cfg.verbose {
-        ui::print_env_dirty();
+        cfg.ui.print_env_dirty();
     }
 
     // The plan is already topologically sorted (leaves first).
@@ -91,10 +94,11 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
         }
 
         // Run the wave in parallel (bounded by the thread pool).
+        let ui = &cfg.ui;
         let results: Vec<Result<()>> = pool.install(|| {
             ready
                 .par_iter()
-                .map(|rule| run_rule(cfg, env_dirty, &lock_file, &rebuilt, rule))
+                .map(|rule| run_rule(cfg, env_dirty, ui, &lock_file, &rebuilt, rule))
                 .collect()
         });
 
@@ -104,7 +108,7 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
                     done.insert(rule.target.clone());
                 }
                 Err(e) if cfg.keep_going => {
-                    ui::print_fail(&rule.target);
+                    cfg.ui.print_fail(&rule.target);
                     eprintln!("pbuild: {e}");
                     failures.push(e);
                 }
@@ -139,6 +143,7 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
 fn run_rule(
     cfg: &Config,
     env_dirty: bool,
+    ui: &UiConfig,
     lock_file: &RwLock<LockFile>,
     rebuilt: &Mutex<HashSet<Target>>,
     rule: &Rule,
@@ -162,7 +167,7 @@ fn run_rule(
 
     if !file_dirty && !dep_rebuilt && !env_dirty {
         if cfg.verbose {
-            ui::print_skip(&rule.target);
+            ui.print_skip(&rule.target);
         }
         return Ok(());
     }
@@ -189,18 +194,20 @@ fn run_rule(
         .collect();
 
     if cfg.dry_run {
+        ui.print_start(&rule.target);
         for cmd in &commands {
-            ui::print_dry_run(cmd);
+            ui.print_dry_run(cmd);
         }
         return Ok(());
     }
 
+    ui.print_start(&rule.target);
     let start = Instant::now();
     for cmd in &commands {
-        ui::print_command(cmd);
+        ui.print_command(cmd);
         run_command(cmd)?;
     }
-    ui::print_done(&rule.target, start.elapsed());
+    ui.print_done(&rule.target, start.elapsed());
 
     // Parse depfile (if any) and discover additional inputs.
     let discovered: Vec<String> = match &rule.depfile {

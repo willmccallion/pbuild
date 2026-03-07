@@ -282,6 +282,7 @@ fn run() -> Result<()> {
         verbose: args.verbose,
         keep_going: args.keep_going,
         env: bf.config.env.clone(),
+        ui: bf.ui.clone(),
     };
     execute_plan(&cfg, &plan)?;
 

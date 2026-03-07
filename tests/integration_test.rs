@@ -97,7 +97,7 @@ fn second_build_skips_unchanged_rule() {
     fx.run_ok(&[]); // cold build
     let out = fx.run_ok(&["--verbose"]); // nothing changed
     assert!(
-        out.contains("[skip]"),
+        out.contains("–"),
         "expected skip on second build, got: {out}"
     );
 }
@@ -310,7 +310,7 @@ fn depfile_discovered_inputs_trigger_rebuild() {
     // Second build — nothing changed, should skip.
     let out = fx.run_ok(&["--verbose"]);
     assert!(
-        out.contains("[skip]"),
+        out.contains("–"),
         "expected skip when nothing changed: {out}"
     );
 
