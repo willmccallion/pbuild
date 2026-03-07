@@ -165,7 +165,7 @@ fn run() -> Result<()> {
         let mut names: Vec<&str> = bf.rules.keys().map(String::as_str).collect();
         names.sort_unstable();
         for name in names {
-            if bf.default.as_deref() == Some(name) {
+            if bf.config.default.as_deref() == Some(name) {
                 println!("{name} (default)");
             } else {
                 println!("{name}");

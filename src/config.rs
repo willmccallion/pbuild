@@ -4,6 +4,7 @@ use std::fs;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
+
 use crate::types::{Rule, Target};
 
 /// Expand a list of glob patterns into concrete file paths.
@@ -37,33 +38,38 @@ fn expand_globs(patterns: &[String]) -> Result<Vec<String>> {
     Ok(paths)
 }
 
-/// Raw TOML schema for `pbuild.toml`.
+/// Parsed `pbuild.toml`.
 ///
 /// ```toml
-/// [rules.app]
-/// command = ["cc", "-o", "app", "main.o"]
-/// deps    = ["main.o"]
-/// inputs  = ["main.o"]
-/// output  = "app"
+/// [config]
+/// default = "app"
 ///
-/// [rules."main.o"]
+/// ["main.o"]
 /// command = ["cc", "-c", "main.c", "-o", "main.o"]
 /// inputs  = ["main.c"]
 /// output  = "main.o"
 ///
-/// [rules.clean]
+/// [app]
+/// command = ["cc", "-o", "app", "main.o"]
+/// deps    = ["main.o"]
+/// output  = "app"
+///
+/// [clean]
 /// type    = "task"
 /// command = ["rm", "-f", "main.o", "app"]
 /// ```
 ///
 /// Rules default to `type = "file"`. Set `type = "task"` for phony targets
 /// that should always run and are never hashed.
-#[derive(Debug, Deserialize)]
 pub struct BuildFile {
-    /// Optional default target name to build when none is specified on the CLI.
-    pub default: Option<String>,
-    #[serde(default)]
+    pub config: BuildConfig,
     pub rules: HashMap<String, RawRule>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct BuildConfig {
+    /// Target to build when none is specified on the CLI.
+    pub default: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
@@ -88,10 +94,30 @@ pub struct RawRule {
 }
 
 /// Parse `pbuild.toml` from the current directory.
+///
+/// The file is a flat TOML table where `[config]` holds build metadata and
+/// every other top-level table is treated as a rule.
 pub fn load_build_file() -> Result<BuildFile> {
     let src = fs::read_to_string("pbuild.toml")
         .context("could not read pbuild.toml")?;
-    toml::from_str(&src).context("invalid pbuild.toml")
+
+    let mut table: toml::Table = toml::from_str(&src).context("invalid pbuild.toml")?;
+
+    let config = match table.remove("config") {
+        Some(v) => v.try_into().context("invalid [config] section")?,
+        None => BuildConfig::default(),
+    };
+
+    let rules = table
+        .into_iter()
+        .map(|(name, value)| {
+            let raw: RawRule = value.try_into()
+                .with_context(|| format!("invalid rule `{name}`"))?;
+            Ok((name, raw))
+        })
+        .collect::<Result<HashMap<_, _>>>()?;
+
+    Ok(BuildFile { config, rules })
 }
 
 /// Convert a `BuildFile` into a flat list of `Rule`s.
@@ -123,7 +149,7 @@ pub fn resolve_target(bf: &BuildFile, name: Option<&str>) -> Result<Target> {
             Some(raw) => Ok(rule_target(n, raw)),
             None => bail!("no rule for target: {n}"),
         },
-        None => match &bf.default {
+        None => match &bf.config.default {
             Some(d) => match bf.rules.get(d.as_str()) {
                 Some(raw) => Ok(rule_target(d, raw)),
                 None => bail!("default target `{d}` has no rule"),

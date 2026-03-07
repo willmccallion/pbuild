@@ -23,7 +23,7 @@ fn glob_inputs_expand_to_matching_files() {
         fs::write(dir.path().join("src/a.c"), "").unwrap();
         fs::write(dir.path().join("src/b.c"), "").unwrap();
         fs::write(dir.path().join("pbuild.toml"), r#"
-            [rules.app]
+            [app]
             command = ["cc", "-o", "app"]
             inputs  = ["src/*.c"]
             output  = "app"
@@ -41,7 +41,7 @@ fn glob_inputs_expand_to_matching_files() {
 fn literal_input_preserved_when_no_match() {
     in_tempdir(|_dir| {
         fs::write("pbuild.toml", r#"
-            [rules.app]
+            [app]
             command = ["cc", "-o", "app"]
             inputs  = ["src/missing.c"]
             output  = "app"
@@ -57,7 +57,7 @@ fn literal_input_preserved_when_no_match() {
 fn invalid_glob_pattern_returns_err() {
     in_tempdir(|_dir| {
         fs::write("pbuild.toml", r#"
-            [rules.app]
+            [app]
             command = ["cc", "-o", "app"]
             inputs  = ["src/[invalid"]
             output  = "app"

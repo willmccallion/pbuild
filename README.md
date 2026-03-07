@@ -19,6 +19,7 @@ cargo install --path .
 Create a `pbuild.toml` in your project root:
 
 ```toml
+[config]
 default = "app"
 
 ["main.o"]
@@ -36,10 +37,11 @@ output  = "app"
 Then run:
 
 ```sh
-pbuild          # build the default target
-pbuild app      # build a specific target
-pbuild --list   # list all targets
-pbuild clean    # delete outputs and reset the lock file
+pbuild              # build the default target
+pbuild app          # build a specific target
+pbuild --list       # list all targets
+pbuild why app      # explain why app would rebuild
+pbuild clean        # delete outputs and reset the lock file
 ```
 
 ---
@@ -47,9 +49,10 @@ pbuild clean    # delete outputs and reset the lock file
 ## pbuild.toml reference
 
 ```toml
+[config]
 default = "app"          # target to build when none is specified on the CLI
 
-[rules.app]
+[app]
 type    = "file"         # "file" (default) or "task"
 command = ["cc", "-o", "app", "main.o"]
 deps    = ["main.o"]     # targets that must be built first
@@ -75,6 +78,7 @@ A rule with no `inputs` always runs.
 ```
 Usage: pbuild [OPTIONS] [TARGET]
        pbuild clean
+       pbuild why <TARGET>
 
 Options:
   -j <N>, --jobs <N>   Run at most N rules in parallel (default: logical CPUs)
@@ -86,6 +90,7 @@ Options:
 
 Special targets:
   clean                Delete all rule outputs and .pbuild.lock
+  why <TARGET>         Explain why a target would rebuild
 ```
 
 ---
