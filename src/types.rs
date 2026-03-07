@@ -33,6 +33,9 @@ pub struct Rule {
     /// One or more commands to run sequentially.
     /// Each inner `Vec<String>` is a single argv.
     pub commands: Vec<Vec<String>>,
+    /// If true, each command is joined and run via `sh -c "..."`.
+    /// Enables shell features: globs, pipes, redirects, `&&`, etc.
+    pub shell: bool,
     /// Short description shown in `--list` output.
     pub description: Option<String>,
     /// Group heading for `--list` output (e.g. "Build", "Quality").

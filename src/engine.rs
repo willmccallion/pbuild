@@ -196,7 +196,11 @@ fn run_rule(
     if cfg.dry_run {
         ui.print_start(&rule.target);
         for cmd in &commands {
-            ui.print_dry_run(cmd);
+            if rule.shell {
+                ui.print_dry_run(&[cmd.join(" ")]);
+            } else {
+                ui.print_dry_run(cmd);
+            }
         }
         return Ok(());
     }
@@ -204,8 +208,13 @@ fn run_rule(
     ui.print_start(&rule.target);
     let start = Instant::now();
     for cmd in &commands {
-        ui.print_command(cmd);
-        run_command(cmd)?;
+        let effective: Vec<String> = if rule.shell {
+            vec!["sh".to_string(), "-c".to_string(), cmd.join(" ")]
+        } else {
+            cmd.clone()
+        };
+        ui.print_command(&effective);
+        run_command(&effective)?;
     }
     ui.print_done(&rule.target, start.elapsed());
 

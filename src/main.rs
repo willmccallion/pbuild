@@ -40,6 +40,7 @@ Options:
   -h, --help           Print this help and exit
 
 Special targets:
+  init                 Write a starter pbuild.toml in the current directory
   clean                Delete all rule outputs and .pbuild.lock
   why <TARGET>         Explain why a target would rebuild"
     );
@@ -173,6 +174,65 @@ fn cmd_why(target_name: &str) -> Result<()> {
     Ok(())
 }
 
+fn cmd_init() -> Result<()> {
+    if std::path::Path::new("pbuild.toml").exists() {
+        anyhow::bail!("pbuild.toml already exists");
+    }
+    fs::write("pbuild.toml", INIT_TEMPLATE).context("failed to write pbuild.toml")?;
+    println!("wrote pbuild.toml");
+    Ok(())
+}
+
+const INIT_TEMPLATE: &str = r#"# pbuild.toml — https://github.com/yourname/pbuild-rs
+#
+# Run `pbuild --list` to see all targets.
+# Run `pbuild <target>` to build a specific target.
+# Run `pbuild` to build the default target.
+
+[config]
+default = "build"           # target to build when none is specified
+# jobs  = 4                 # max parallel rules (default: logical CPUs)
+# env   = ["CC", "CFLAGS"]  # env vars that trigger a full rebuild when changed
+
+# [vars]
+# Define reusable values with {{name}} interpolation in commands.
+# cargo   = "cargo"
+# python  = ".venv/bin/python"
+
+# ── Rules ────────────────────────────────────────────────────────────────────
+#
+# Each rule is a TOML table.  Minimal required field: `command` or `commands`.
+#
+# Fields:
+#   type        = "task" | "file"   (default: file)
+#   command     = ["cmd", "arg"]    single command
+#   commands    = [["cmd1"], ...]   multiple sequential commands
+#   shell       = true              run via sh -c (enables pipes, globs, &&)
+#   inputs      = ["src/**/*.rs"]   files to hash for dirty-checking (globs ok)
+#   output      = "app"             file produced; hashed after success
+#   deps        = ["other-rule"]    rules that must build first
+#   depfile     = "main.d"          compiler depfile; pbuild injects -MF
+#   description = "..."             shown in `pbuild --list`
+#   group       = "Build"           group heading in `pbuild --list`
+
+[build]
+group       = "Build"
+description = "Build the project"
+type        = "task"
+command     = ["echo", "replace me with your build command"]
+
+[test]
+group       = "Build"
+description = "Run tests"
+type        = "task"
+command     = ["echo", "replace me with your test command"]
+
+[clean]
+description = "Remove build artifacts"
+type        = "task"
+command     = ["echo", "replace me with your clean command"]
+"#;
+
 fn cmd_clean() -> Result<()> {
     // Build file is optional — if absent we can still wipe the lock file.
     if let Ok(bf) = load_build_file() {
@@ -257,6 +317,10 @@ fn run() -> Result<()> {
 
     if args.target.as_deref() == Some("clean") {
         return cmd_clean();
+    }
+
+    if args.target.as_deref() == Some("init") {
+        return cmd_init();
     }
 
     let bf = load_build_file()?;

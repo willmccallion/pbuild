@@ -136,6 +136,9 @@ pub struct RawRule {
     pub output: String,
     /// Path where the compiler will write a Make-style depfile.
     pub depfile: Option<String>,
+    /// If true, join each command and run it via `sh -c`.
+    #[serde(default)]
+    pub shell: bool,
     /// Short description shown in `--list` output.
     pub description: Option<String>,
     /// Group heading for `--list` output.
@@ -221,6 +224,7 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
                 output: interpolate(&bf.vars, &raw.output),
                 depfile: raw.depfile.as_deref().map(|s| interpolate(&bf.vars, s)),
                 commands,
+                shell: raw.shell,
                 description: raw.description.clone(),
                 group: raw.group.clone(),
             })

@@ -324,6 +324,24 @@ fn depfile_discovered_inputs_trigger_rebuild() {
 }
 
 #[test]
+fn shell_true_enables_shell_features() {
+    let fx = Fixture::new();
+    fx.write("pbuild.toml", r#"
+        [config]
+        default = "run"
+
+        [run]
+        type    = "task"
+        shell   = true
+        command = ["echo hello > out.txt && echo world >> out.txt"]
+    "#);
+
+    fx.run_ok(&[]);
+    let out = fs::read_to_string(fx.path("out.txt")).unwrap();
+    assert_eq!(out.trim(), "hello\nworld");
+}
+
+#[test]
 fn multi_step_commands_run_in_order() {
     let fx = Fixture::new();
     fx.write(

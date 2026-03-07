@@ -18,8 +18,8 @@ pub fn run_command(argv: &[String]) -> Result<()> {
         .status()?;
 
     if !status.success() {
-        let code = status.code().unwrap_or(-1);
-        bail!("command `{}` exited with status {}", argv.join(" "), code);
+        let code = status.code().map_or("signal".to_string(), |c| c.to_string());
+        bail!("exited {code}: {}", argv.join(" "));
     }
 
     Ok(())

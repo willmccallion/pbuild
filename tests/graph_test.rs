@@ -9,6 +9,7 @@ fn mk_rule(target: Target, deps: Vec<Target>) -> Rule {
         output: String::new(),
         depfile: None,
         commands: vec![vec!["true".to_string()]],
+        shell: false,
         description: None,
         group: None,
     }
