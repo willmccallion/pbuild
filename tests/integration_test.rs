@@ -244,6 +244,25 @@ fn depfile_discovered_inputs_trigger_rebuild() {
 }
 
 #[test]
+fn vars_substituted_in_command() {
+    let fx = Fixture::new();
+    fx.write("pbuild.toml", r#"
+        [config]
+        default = "greet"
+
+        [vars]
+        greeting = "hello"
+
+        [greet]
+        type    = "task"
+        command = ["sh", "-c", "echo {{greeting}}"]
+    "#);
+
+    let out = fx.run_ok(&[]);
+    assert!(out.contains("hello"), "expected var substitution in output, got: {out}");
+}
+
+#[test]
 fn depfile_mf_flag_injected_automatically() {
     let fx = Fixture::new();
 

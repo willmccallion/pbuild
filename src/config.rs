@@ -4,7 +4,6 @@ use std::fs;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
-
 use crate::types::{Rule, Target};
 
 /// Expand a list of glob patterns into concrete file paths.
@@ -44,25 +43,21 @@ fn expand_globs(patterns: &[String]) -> Result<Vec<String>> {
 /// [config]
 /// default = "app"
 ///
+/// [vars]
+/// cargo = "cargo"
+///
 /// ["main.o"]
-/// command = ["cc", "-c", "main.c", "-o", "main.o"]
+/// command = ["{{cargo}}", "build"]
 /// inputs  = ["main.c"]
 /// output  = "main.o"
-///
-/// [app]
-/// command = ["cc", "-o", "app", "main.o"]
-/// deps    = ["main.o"]
-/// output  = "app"
-///
-/// [clean]
-/// type    = "task"
-/// command = ["rm", "-f", "main.o", "app"]
 /// ```
 ///
 /// Rules default to `type = "file"`. Set `type = "task"` for phony targets
 /// that should always run and are never hashed.
 pub struct BuildFile {
     pub config: BuildConfig,
+    /// Variable definitions from `[vars]`. Used for `{{name}}` interpolation.
+    pub vars: HashMap<String, String>,
     pub rules: HashMap<String, RawRule>,
 }
 
@@ -75,6 +70,41 @@ pub struct BuildConfig {
     /// Environment variables that trigger a full rebuild when their value changes.
     #[serde(default)]
     pub env: Vec<String>,
+}
+
+/// Substitute `{{name}}` placeholders in `s`.
+///
+/// Resolution order:
+/// 1. `[vars]` table in `pbuild.toml`
+/// 2. Environment variable with the same name
+///
+/// Unknown placeholders are left as-is so the error surfaces naturally when
+/// the command runs.
+fn interpolate(vars: &HashMap<String, String>, s: &str) -> String {
+    let mut out = s.to_string();
+    let mut pos = 0;
+    while let Some(rel_start) = out[pos..].find("{{") {
+        let abs_start = pos + rel_start;
+        let Some(rel_end) = out[abs_start..].find("}}") else { break };
+        let abs_end = abs_start + rel_end;
+        let key = &out[abs_start + 2..abs_end];
+        // Resolution order: [vars] table → environment → leave as-is.
+        let value = if let Some(v) = vars.get(key) {
+            v.clone()
+        } else if let Ok(v) = std::env::var(key) {
+            v
+        } else {
+            pos = abs_end + 2;
+            continue;
+        };
+        out.replace_range(abs_start..abs_end + 2, &value);
+        pos = abs_start + value.len();
+    }
+    out
+}
+
+fn interpolate_vec(vars: &HashMap<String, String>, v: &[String]) -> Vec<String> {
+    v.iter().map(|s| interpolate(vars, s)).collect()
 }
 
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
@@ -115,6 +145,11 @@ pub fn load_build_file() -> Result<BuildFile> {
         None => BuildConfig::default(),
     };
 
+    let vars: HashMap<String, String> = match table.remove("vars") {
+        Some(v) => v.try_into().context("invalid [vars] section")?,
+        None => HashMap::new(),
+    };
+
     let rules = table
         .into_iter()
         .map(|(name, value)| {
@@ -124,7 +159,7 @@ pub fn load_build_file() -> Result<BuildFile> {
         })
         .collect::<Result<HashMap<_, _>>>()?;
 
-    Ok(BuildFile { config, rules })
+    Ok(BuildFile { config, vars, rules })
 }
 
 /// Convert a `BuildFile` into a flat list of `Rule`s.
@@ -136,15 +171,15 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
         .map(|(name, raw)| {
             let target = rule_target(name, raw);
             let deps = raw.deps.iter().map(|d| resolve_dep(bf, d)).collect();
-            let inputs = expand_globs(&raw.inputs)
+            let inputs = expand_globs(&interpolate_vec(&bf.vars, &raw.inputs))
                 .with_context(|| format!("rule `{name}`: failed to expand inputs"))?;
             Ok(Rule {
                 target,
                 deps,
                 inputs,
-                output: raw.output.clone(),
-                depfile: raw.depfile.clone(),
-                command: raw.command.clone(),
+                output: interpolate(&bf.vars, &raw.output),
+                depfile: raw.depfile.as_deref().map(|s| interpolate(&bf.vars, s)),
+                command: interpolate_vec(&bf.vars, &raw.command),
             })
         })
         .collect()

@@ -54,6 +54,58 @@ fn literal_input_preserved_when_no_match() {
 }
 
 #[test]
+fn vars_substituted_in_command() {
+    in_tempdir(|_dir| {
+        fs::write("pbuild.toml", r#"
+            [vars]
+            cargo = "cargo"
+            profile = "release"
+
+            [build]
+            type    = "task"
+            command = ["{{cargo}}", "build", "--{{profile}}"]
+        "#).unwrap();
+
+        let bf = load_build_file().unwrap();
+        let rules = to_rules(&bf).unwrap();
+        assert_eq!(rules[0].command, ["cargo", "build", "--release"]);
+    });
+}
+
+#[test]
+fn vars_fall_back_to_env() {
+    in_tempdir(|_dir| {
+        // PATH is always set — use it as a known-present env var.
+        fs::write("pbuild.toml", r#"
+            [build]
+            type    = "task"
+            command = ["echo", "{{PATH}}"]
+        "#).unwrap();
+
+        let bf = load_build_file().unwrap();
+        let rules = to_rules(&bf).unwrap();
+        // If the env fallback works, the placeholder is replaced with the real PATH value.
+        let path_val = std::env::var("PATH").unwrap();
+        assert_eq!(rules[0].command[1], path_val);
+    });
+}
+
+#[test]
+fn unknown_var_left_as_is() {
+    in_tempdir(|_dir| {
+        fs::write("pbuild.toml", r#"
+            [build]
+            type    = "task"
+            command = ["{{no_such_var}}", "build"]
+        "#).unwrap();
+
+        let bf = load_build_file().unwrap();
+        let rules = to_rules(&bf).unwrap();
+        assert_eq!(rules[0].command[0], "{{no_such_var}}");
+    });
+}
+
+#[test]
 fn invalid_glob_pattern_returns_err() {
     in_tempdir(|_dir| {
         fs::write("pbuild.toml", r#"
