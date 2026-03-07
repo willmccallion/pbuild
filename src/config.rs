@@ -81,7 +81,11 @@ pub struct BuildConfig {
 ///
 /// Unknown placeholders are left as-is so the error surfaces naturally when
 /// the command runs.
-fn interpolate(vars: &HashMap<String, String>, s: &str) -> String {
+///
+/// `allow_env`: whether to fall back to environment variables for unknown keys.
+/// Should be `false` for `shell = true` rules to prevent shell injection via
+/// attacker-controlled env vars.
+fn interpolate(vars: &HashMap<String, String>, s: &str, allow_env: bool) -> String {
     let mut out = s.to_string();
     let mut pos = 0;
     while let Some(rel_start) = out[pos..].find("{{") {
@@ -91,11 +95,16 @@ fn interpolate(vars: &HashMap<String, String>, s: &str) -> String {
         };
         let abs_end = abs_start + rel_end;
         let key = &out[abs_start + 2..abs_end];
-        // Resolution order: [vars] table → environment → leave as-is.
+        // Resolution order: [vars] table → environment (if allowed) → leave as-is.
         let value = if let Some(v) = vars.get(key) {
             v.clone()
-        } else if let Ok(v) = std::env::var(key) {
-            v
+        } else if allow_env {
+            if let Ok(v) = std::env::var(key) {
+                v
+            } else {
+                pos = abs_end + 2;
+                continue;
+            }
         } else {
             pos = abs_end + 2;
             continue;
@@ -106,8 +115,8 @@ fn interpolate(vars: &HashMap<String, String>, s: &str) -> String {
     out
 }
 
-fn interpolate_vec(vars: &HashMap<String, String>, v: &[String]) -> Vec<String> {
-    v.iter().map(|s| interpolate(vars, s)).collect()
+fn interpolate_vec(vars: &HashMap<String, String>, v: &[String], allow_env: bool) -> Vec<String> {
+    v.iter().map(|s| interpolate(vars, s, allow_env)).collect()
 }
 
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
@@ -203,16 +212,18 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
         .map(|(name, raw)| {
             let target = rule_target(name, raw);
             let deps = raw.deps.iter().map(|d| resolve_dep(bf, d)).collect();
-            let inputs = expand_globs(&interpolate_vec(&bf.vars, &raw.inputs))
+            let inputs = expand_globs(&interpolate_vec(&bf.vars, &raw.inputs, true))
                 .with_context(|| format!("rule `{name}`: failed to expand inputs"))?;
             // Merge `command` (single) and `commands` (multi-step) into one list.
             // `command` is prepended if both are specified.
+            // Env-var interpolation is disabled for shell rules to prevent injection.
+            let cmd_env = !raw.shell;
             let mut commands: Vec<Vec<String>> = Vec::new();
             if !raw.command.is_empty() {
-                commands.push(interpolate_vec(&bf.vars, &raw.command));
+                commands.push(interpolate_vec(&bf.vars, &raw.command, cmd_env));
             }
             for cmd in &raw.commands {
-                commands.push(interpolate_vec(&bf.vars, cmd));
+                commands.push(interpolate_vec(&bf.vars, cmd, cmd_env));
             }
             if commands.is_empty() {
                 anyhow::bail!("rule `{name}` has no command");
@@ -221,8 +232,8 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
                 target,
                 deps,
                 inputs,
-                output: interpolate(&bf.vars, &raw.output),
-                depfile: raw.depfile.as_deref().map(|s| interpolate(&bf.vars, s)),
+                output: interpolate(&bf.vars, &raw.output, true),
+                depfile: raw.depfile.as_deref().map(|s| interpolate(&bf.vars, s, true)),
                 commands,
                 shell: raw.shell,
                 description: raw.description.clone(),
