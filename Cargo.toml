@@ -32,6 +32,7 @@ rayon = "1"
 anyhow = "1"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
+glob = "0.3"
 
 [dev-dependencies]
 tempfile = "3"

@@ -6,6 +6,31 @@ use serde::Deserialize;
 
 use crate::types::{Rule, Target};
 
+fn expand_globs(patterns: &[String]) -> Result<Vec<String>> {
+    let mut paths = Vec::new();
+    for pattern in patterns {
+        let matches: Vec<_> = glob::glob(pattern)
+            .with_context(|| format!("invalid glob pattern: {pattern}"))?
+            .collect::<Result<_, _>>()
+            .with_context(|| format!("error reading glob pattern: {pattern}"))?;
+
+        if matches.is_empty() {
+            // Keep the literal string so the engine can report a meaningful
+            // "missing input" error rather than silently skipping it.
+            paths.push(pattern.clone());
+        } else {
+            for path in matches {
+                paths.push(
+                    path.to_str()
+                        .with_context(|| format!("non-UTF-8 path matched by {pattern}"))?
+                        .to_string(),
+                );
+            }
+        }
+    }
+    Ok(paths)
+}
+
 /// Raw TOML schema for `pbuild.toml`.
 ///
 /// ```toml
@@ -64,16 +89,20 @@ pub fn load_build_file() -> Result<BuildFile> {
 }
 
 /// Convert a `BuildFile` into a flat list of `Rule`s.
+///
+/// Glob patterns in `inputs` are expanded to concrete file paths at this point.
 pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
     bf.rules
         .iter()
         .map(|(name, raw)| {
             let target = rule_target(name, raw);
             let deps = raw.deps.iter().map(|d| resolve_dep(bf, d)).collect();
+            let inputs = expand_globs(&raw.inputs)
+                .with_context(|| format!("rule `{name}`: failed to expand inputs"))?;
             Ok(Rule {
                 target,
                 deps,
-                inputs: raw.inputs.clone(),
+                inputs,
                 output: raw.output.clone(),
                 command: raw.command.clone(),
             })
