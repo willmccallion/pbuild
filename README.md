@@ -54,12 +54,13 @@ default = "app"              # target to build when none is specified on the CLI
 jobs    = 8                  # default parallelism (overridden by -j on the CLI)
 env     = ["CC", "CFLAGS"]  # env vars that trigger a full rebuild when changed
 
-[app]
-type    = "file"         # "file" (default) or "task"
-command = ["cc", "-o", "app", "main.o"]
-deps    = ["main.o"]     # targets that must be built first
-inputs  = ["src/**/*.c"] # files that trigger a rebuild when changed (globs supported)
-output  = "app"          # file written by this rule (hashed after success)
+["main.o"]
+type    = "file"             # "file" (default) or "task"
+command = ["cc", "-c", "main.c", "-o", "main.o"]
+deps    = ["main.o"]         # targets that must be built first
+inputs  = ["main.c"]         # files that trigger a rebuild when changed (globs supported)
+output  = "main.o"           # file written by this rule (hashed after success)
+depfile = "main.d"           # compiler-written depfile; pbuild injects -MF automatically
 ```
 
 ### `[config]`
@@ -69,6 +70,17 @@ output  = "app"          # file written by this rule (hashed after success)
 | `default` | string | Target to build when none is given on the CLI |
 | `jobs` | integer | Default parallelism; overridden by `-j` |
 | `env` | string array | Environment variables that trigger a full rebuild when their value changes |
+
+### Rule fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | `"file"` (default) or `"task"` |
+| `command` | string array | Command to run |
+| `deps` | string array | Targets that must be built first |
+| `inputs` | string array | Files to hash for dirty-checking; globs supported |
+| `output` | string | File produced by this rule; hashed after success |
+| `depfile` | string | Path where the compiler will write a depfile; pbuild injects `-MF <path>` automatically |
 
 ### `type`
 
@@ -81,9 +93,21 @@ pbuild hashes every file listed in `inputs` before deciding whether to run a rul
 
 A rule with no `inputs` always runs.
 
+### `depfile` — automatic header tracking
+
+When `depfile = "foo.d"` is set, pbuild automatically appends `-MF foo.d` to the command. After the build, it parses the depfile and records every discovered header in `.pbuild.lock`. On future runs those headers are checked for changes — so modifying any included header triggers a rebuild, without listing every header manually in `inputs`.
+
+```toml
+["main.o"]
+command = ["cc", "-c", "main.c", "-o", "main.o"]
+inputs  = ["main.c"]
+output  = "main.o"
+depfile = "main.d"
+```
+
 ### `env` tracking
 
-Environment variables listed in `[config] env` are hashed and stored in `.pbuild.lock`. If any of them change between runs, every rule rebuilds. This catches the common mistake of changing `CC` or `CFLAGS` and getting a silently stale build.
+Environment variables listed in `[config] env` are stored in `.pbuild.lock`. If any change between runs, every rule rebuilds. This catches the common mistake of changing `CC` or `CFLAGS` and getting a silently stale build.
 
 ---
 

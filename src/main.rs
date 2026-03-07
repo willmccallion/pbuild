@@ -85,7 +85,12 @@ fn cmd_why(target_name: &str) -> Result<()> {
 
     println!("target: {target_name}");
 
-    if inputs.is_empty() {
+    // Merge declared inputs with depfile-discovered inputs from the lock file.
+    let discovered = raw.depfile.as_deref()
+        .map(|_| hash::load_depfile_inputs(&lf, &raw.output))
+        .unwrap_or_default();
+
+    if inputs.is_empty() && discovered.is_empty() {
         println!("  no inputs declared — always runs");
     } else {
         println!("  inputs:");
@@ -96,6 +101,17 @@ fn cmd_why(target_name: &str) -> Result<()> {
                 Err(e)    => return Err(e).with_context(|| format!("could not hash {path}")),
             };
             println!("    {path}  {status}");
+        }
+        if !discovered.is_empty() {
+            println!("  depfile inputs (auto-discovered):");
+            for path in &discovered {
+                let status = match hash::is_dirty(&lf, path) {
+                    Ok(true)  => "CHANGED",
+                    Ok(false) => "clean",
+                    Err(e)    => return Err(e).with_context(|| format!("could not hash {path}")),
+                };
+                println!("    {path}  {status}");
+            }
         }
     }
 

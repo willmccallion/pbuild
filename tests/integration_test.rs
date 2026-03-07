@@ -207,3 +207,64 @@ fn failed_rule_exits_nonzero() {
     let out = fx.run(&[]);
     assert!(!out.status.success(), "expected nonzero exit when rule fails");
 }
+
+#[test]
+fn depfile_discovered_inputs_trigger_rebuild() {
+    let fx = Fixture::new();
+
+    // A script that produces the output AND writes a depfile listing a header.
+    // pbuild injects -MF automatically, so we read it from the last two args.
+    fx.write("pbuild.toml", r#"
+        [config]
+        default = "out.o"
+
+        ["out.o"]
+        command = ["sh", "build.sh"]
+        inputs  = ["src.c"]
+        output  = "out.o"
+        depfile = "out.d"
+    "#);
+    fx.write("src.c", "// source");
+    fx.write("header.h", "// header v1");
+    // build.sh simulates a compiler: writes the output and a depfile.
+    // pbuild appends `-MF out.d` to the command, so $3/$4 are -MF and out.d.
+    fx.write("build.sh", "touch out.o && echo \"out.o: src.c header.h\" > $2\n");
+
+    // Cold build — discovers header.h via depfile.
+    fx.run_ok(&[]);
+
+    // Second build — nothing changed, should skip.
+    let out = fx.run_ok(&["--verbose"]);
+    assert!(out.contains("[skip]"), "expected skip when nothing changed: {out}");
+
+    // Modify the discovered header — should trigger a rebuild.
+    fs::write(fx.path("header.h"), "// header v2").unwrap();
+    let out = fx.run_ok(&[]);
+    assert!(out.contains("build.sh"), "expected rebuild after header change: {out}");
+}
+
+#[test]
+fn depfile_mf_flag_injected_automatically() {
+    let fx = Fixture::new();
+
+    // Verify that pbuild injects -MF <path> by checking the args the script receives.
+    fx.write("pbuild.toml", r#"
+        [config]
+        default = "out.o"
+
+        ["out.o"]
+        command = ["sh", "build.sh"]
+        inputs  = ["src.c"]
+        output  = "out.o"
+        depfile = "out.d"
+    "#);
+    fx.write("src.c", "// source");
+    // Record all args to a file so we can inspect them.
+    fx.write("build.sh", "echo \"$@\" > args.txt && touch out.o && echo 'out.o: src.c' > $2\n");
+
+    fx.run_ok(&[]);
+
+    let args = fs::read_to_string(fx.path("args.txt")).unwrap();
+    assert!(args.contains("-MF"), "expected -MF in injected args: {args}");
+    assert!(args.contains("out.d"), "expected depfile path in injected args: {args}");
+}
