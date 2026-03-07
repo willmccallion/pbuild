@@ -1,0 +1,105 @@
+# pbuild
+
+A small, parallel build system written in Rust. Weekend project — built to understand how tools like Ninja work under the hood.
+
+Rules are declared in a `pbuild.toml` file. pbuild hashes input files to decide what needs rebuilding, runs independent rules in parallel, and persists hashes to `.pbuild.lock` for fast incremental builds.
+
+---
+
+## Install
+
+```sh
+cargo install --path .
+```
+
+---
+
+## Quick start
+
+Create a `pbuild.toml` in your project root:
+
+```toml
+default = "app"
+
+["main.o"]
+command = ["cc", "-c", "main.c", "-o", "main.o"]
+inputs  = ["main.c"]
+output  = "main.o"
+
+[app]
+command = ["cc", "-o", "app", "main.o"]
+deps    = ["main.o"]
+inputs  = ["main.o"]
+output  = "app"
+```
+
+Then run:
+
+```sh
+pbuild          # build the default target
+pbuild app      # build a specific target
+pbuild --list   # list all targets
+pbuild clean    # delete outputs and reset the lock file
+```
+
+---
+
+## pbuild.toml reference
+
+```toml
+default = "app"          # target to build when none is specified on the CLI
+
+[rules.app]
+type    = "file"         # "file" (default) or "task"
+command = ["cc", "-o", "app", "main.o"]
+deps    = ["main.o"]     # targets that must be built first
+inputs  = ["src/**/*.c"] # files that trigger a rebuild when changed (globs supported)
+output  = "app"          # file written by this rule (hashed after success)
+```
+
+### `type`
+
+- `file` — the rule produces an output file. pbuild hashes it after a successful build and skips the rule on the next run if nothing has changed.
+- `task` — a phony target (like `test` or `lint`). Always runs if any of its deps were rebuilt.
+
+### `inputs` and dirty checking
+
+pbuild hashes every file listed in `inputs` before deciding whether to run a rule. If all hashes match `.pbuild.lock`, the rule is skipped. Glob patterns (`src/**/*.c`, `include/*.h`) are expanded at load time.
+
+A rule with no `inputs` always runs.
+
+---
+
+## CLI reference
+
+```
+Usage: pbuild [OPTIONS] [TARGET]
+       pbuild clean
+
+Options:
+  -j <N>, --jobs <N>   Run at most N rules in parallel (default: logical CPUs)
+  -n, --dry-run        Print commands without running them
+  -k, --keep-going     Keep building independent rules after a failure
+  -v, --verbose        Print skipped rules
+  -l, --list           List all available targets and exit
+  -h, --help           Print this help and exit
+
+Special targets:
+  clean                Delete all rule outputs and .pbuild.lock
+```
+
+---
+
+## How it works
+
+1. `pbuild.toml` is parsed into a list of rules.
+2. A dependency graph is built and topologically sorted.
+3. Rules are executed in waves — all rules whose dependencies are satisfied run in parallel, bounded by `-j`.
+4. After each wave, input and output files are hashed and flushed to `.pbuild.lock`.
+5. On the next run, rules whose hashes haven't changed are skipped.
+
+---
+
+## License
+
+MIT
