@@ -34,10 +34,11 @@ pub fn read_lock_file() -> io::Result<LockFile> {
 pub fn write_lock_file(lf: &LockFile) -> io::Result<()> {
     let mut entries: Vec<_> = lf.iter().collect();
     entries.sort_by_key(|(k, _)| *k);
-    let contents: String = entries
-        .iter()
-        .map(|(p, h)| format!("{}\t{}\n", p, h))
-        .collect();
+    let contents = entries.iter().fold(String::new(), |mut s, (p, h)| {
+        use std::fmt::Write;
+        let _ = writeln!(s, "{p}\t{h}");
+        s
+    });
     fs::write(LOCK_PATH, contents)
 }
 
@@ -45,15 +46,13 @@ pub fn write_lock_file(lf: &LockFile) -> io::Result<()> {
 /// A missing file or missing lock entry is always dirty.
 pub fn is_dirty(lf: &LockFile, path: &str) -> io::Result<bool> {
     let current = hash_file(path)?;
-    Ok(current.as_deref() != lf.get(path).map(|s| s.as_str()))
+    Ok(current.as_deref() != lf.get(path).map(String::as_str))
 }
 
 fn parse_lock_file(s: &str) -> LockFile {
     s.lines()
         .filter_map(|line| {
-            let mut parts = line.splitn(2, '\t');
-            let path = parts.next()?;
-            let hash = parts.next()?;
+            let (path, hash) = line.split_once('\t')?;
             Some((path.to_string(), hash.to_string()))
         })
         .collect()

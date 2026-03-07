@@ -35,17 +35,12 @@ pub struct BuildFile {
     pub rules: HashMap<String, RawRule>,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum RawTargetType {
+    #[default]
     File,
     Task,
-}
-
-impl Default for RawTargetType {
-    fn default() -> Self {
-        RawTargetType::File
-    }
 }
 
 #[derive(Debug, Deserialize)]

@@ -91,7 +91,11 @@ fn lock_file_round_trips() {
     // Serialize manually the same way the module does.
     let mut entries: Vec<_> = original.iter().collect();
     entries.sort_by_key(|(k, _)| *k);
-    let contents: String = entries.iter().map(|(p, h)| format!("{}\t{}\n", p, h)).collect();
+    let contents: String = entries.iter().fold(String::new(), |mut s, (p, h)| {
+        use std::fmt::Write;
+        let _ = writeln!(s, "{p}\t{h}");
+        s
+    });
     std::fs::write(&lock, &contents).unwrap();
     let parsed: std::collections::HashMap<String, String> = std::fs::read_to_string(&lock)
         .unwrap()

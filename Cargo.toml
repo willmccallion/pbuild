@@ -2,6 +2,20 @@
 name = "pbuild"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+description = "A parallel, hash-based build engine"
+license = "MIT"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# pedantic lints that are noisy without much benefit:
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
 
 [lib]
 name = "pbuild"

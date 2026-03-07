@@ -72,7 +72,7 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
         let results: Vec<Result<()>> = pool.install(|| {
             ready
                 .par_iter()
-                .map(|rule| run_rule(cfg, &*lock_file, &*rebuilt, rule))
+                .map(|rule| run_rule(cfg, &lock_file, &rebuilt, rule))
                 .collect()
         });
 
@@ -124,7 +124,7 @@ fn run_rule(
     let paths_to_hash: Vec<&str> = rule
         .inputs
         .iter()
-        .map(|s| s.as_str())
+        .map(String::as_str)
         .chain(std::iter::once(rule.output.as_str()))
         .filter(|s| !s.is_empty())
         .collect();

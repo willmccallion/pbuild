@@ -5,13 +5,13 @@ use anyhow::{bail, Result};
 /// Run a command given as an argv list. Streams stdout/stderr to the terminal.
 /// Returns an error if the command exits non-zero or cannot be spawned.
 pub fn run_command(argv: &[String]) -> Result<()> {
-    let (cmd, args) = match argv {
+    let (program, rest) = match argv {
         [] => return Ok(()),
-        [cmd, args @ ..] => (cmd, args),
+        [program, rest @ ..] => (program, rest),
     };
 
-    let status = Command::new(cmd)
-        .args(args)
+    let status = Command::new(program)
+        .args(rest)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

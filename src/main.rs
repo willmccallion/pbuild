@@ -11,7 +11,7 @@ fn run() -> Result<()> {
     let mut args = std::env::args().skip(1).peekable();
 
     let mut jobs: usize = std::thread::available_parallelism()
-        .map(|n| n.get())
+        .map(std::num::NonZero::get)
         .unwrap_or(4);
     let mut dry_run = false;
     let mut verbose = false;

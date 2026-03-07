@@ -10,7 +10,7 @@ fn mk_task(target: Target, deps: Vec<Target>, command: Vec<&str>) -> Rule {
         deps,
         inputs: vec![],
         output: String::new(),
-        command: command.into_iter().map(|s| s.to_string()).collect(),
+        command: command.into_iter().map(ToString::to_string).collect(),
     }
 }
 
