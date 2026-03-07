@@ -15,6 +15,7 @@ struct Args {
     verbose: bool,
     keep_going: bool,
     list: bool,
+    help: bool,
     target: Option<String>,
 }
 
@@ -28,9 +29,27 @@ impl Default for Args {
             verbose: false,
             keep_going: false,
             list: false,
+            help: false,
             target: None,
         }
     }
+}
+
+fn print_help() {
+    println!("\
+Usage: pbuild [OPTIONS] [TARGET]
+       pbuild clean
+
+Options:
+  -j <N>, --jobs <N>   Run at most N rules in parallel (default: logical CPUs)
+  -n, --dry-run        Print commands without running them
+  -k, --keep-going     Keep building independent rules after a failure
+  -v, --verbose        Print skipped rules
+  -l, --list           List all available targets and exit
+  -h, --help           Print this help and exit
+
+Special targets:
+  clean                Delete all rule outputs and .pbuild.lock");
 }
 
 fn parse_args() -> Result<Args> {
@@ -43,6 +62,7 @@ fn parse_args() -> Result<Args> {
             "-v" | "--verbose"     => args.verbose = true,
             "-k" | "--keep-going"  => args.keep_going = true,
             "-l" | "--list"        => args.list = true,
+            "-h" | "--help"        => args.help = true,
             "-j" | "--jobs"        => {
                 let val = raw.next().ok_or_else(|| anyhow::anyhow!("-j requires a value"))?;
                 args.jobs = val.parse().context("-j requires a positive integer")?;
@@ -82,6 +102,11 @@ fn cmd_clean() -> Result<()> {
 
 fn run() -> Result<()> {
     let args = parse_args()?;
+
+    if args.help {
+        print_help();
+        return Ok(());
+    }
 
     if args.target.as_deref() == Some("clean") {
         return cmd_clean();
