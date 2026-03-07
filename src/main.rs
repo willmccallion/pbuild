@@ -1,3 +1,4 @@
+use std::fs;
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
@@ -56,8 +57,36 @@ fn parse_args() -> Result<Args> {
     Ok(args)
 }
 
+fn cmd_clean() -> Result<()> {
+    let bf = load_build_file()?;
+
+    for raw in bf.rules.values() {
+        if raw.output.is_empty() {
+            continue;
+        }
+        match fs::remove_file(&raw.output) {
+            Ok(()) => println!("rm {}", raw.output),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e).with_context(|| format!("failed to remove {}", raw.output)),
+        }
+    }
+
+    match fs::remove_file(".pbuild.lock") {
+        Ok(()) => println!("rm .pbuild.lock"),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e).context("failed to remove .pbuild.lock"),
+    }
+
+    Ok(())
+}
+
 fn run() -> Result<()> {
     let args = parse_args()?;
+
+    if args.target.as_deref() == Some("clean") {
+        return cmd_clean();
+    }
+
     let bf = load_build_file()?;
 
     if args.list {
