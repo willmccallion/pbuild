@@ -77,27 +77,25 @@ fn parse_args() -> Result<Args> {
     Ok(args)
 }
 
+fn remove_if_exists(path: &str) -> Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => { println!("rm {path}"); Ok(()) }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e).with_context(|| format!("failed to remove {path}")),
+    }
+}
+
 fn cmd_clean() -> Result<()> {
-    let bf = load_build_file()?;
-
-    for raw in bf.rules.values() {
-        if raw.output.is_empty() {
-            continue;
-        }
-        match fs::remove_file(&raw.output) {
-            Ok(()) => println!("rm {}", raw.output),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e).with_context(|| format!("failed to remove {}", raw.output)),
+    // Build file is optional — if absent we can still wipe the lock file.
+    if let Ok(bf) = load_build_file() {
+        for raw in bf.rules.values() {
+            if !raw.output.is_empty() {
+                remove_if_exists(&raw.output)?;
+            }
         }
     }
 
-    match fs::remove_file(".pbuild.lock") {
-        Ok(()) => println!("rm .pbuild.lock"),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e).context("failed to remove .pbuild.lock"),
-    }
-
-    Ok(())
+    remove_if_exists(".pbuild.lock")
 }
 
 fn run() -> Result<()> {
