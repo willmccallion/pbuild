@@ -3,9 +3,10 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use pbuild::{
-    config::{load_build_file, resolve_target, to_rules},
+    config::{expand_inputs, load_build_file, resolve_target, to_rules},
     engine::{execute_plan, Config},
     graph::build_plan,
+    hash,
 };
 
 #[allow(clippy::struct_excessive_bools)]
@@ -39,6 +40,7 @@ fn print_help() {
     println!("\
 Usage: pbuild [OPTIONS] [TARGET]
        pbuild clean
+       pbuild why <TARGET>
 
 Options:
   -j <N>, --jobs <N>   Run at most N rules in parallel (default: logical CPUs)
@@ -49,7 +51,8 @@ Options:
   -h, --help           Print this help and exit
 
 Special targets:
-  clean                Delete all rule outputs and .pbuild.lock");
+  clean                Delete all rule outputs and .pbuild.lock
+  why <TARGET>         Explain why a target would rebuild");
 }
 
 fn parse_args() -> Result<Args> {
@@ -85,6 +88,44 @@ fn remove_if_exists(path: &str) -> Result<()> {
     }
 }
 
+fn cmd_why(target_name: &str) -> Result<()> {
+    let bf = load_build_file()?;
+    let raw = bf.rules.get(target_name)
+        .ok_or_else(|| anyhow::anyhow!("no rule for target: {target_name}"))?;
+
+    let lf = hash::read_lock_file().context("could not read .pbuild.lock")?;
+    let inputs = expand_inputs(&raw.inputs)?;
+
+    println!("target: {target_name}");
+
+    if inputs.is_empty() {
+        println!("  no inputs declared — always runs");
+    } else {
+        println!("  inputs:");
+        for path in &inputs {
+            let status = match hash::is_dirty(&lf, path) {
+                Ok(true)  => "CHANGED",
+                Ok(false) => "clean",
+                Err(e)    => return Err(e).with_context(|| format!("could not hash {path}")),
+            };
+            println!("    {path}  {status}");
+        }
+    }
+
+    if !raw.deps.is_empty() {
+        println!("  deps:");
+        for dep in &raw.deps {
+            let built = bf.rules.get(dep.as_str())
+                .and_then(|r| if r.output.is_empty() { None } else { Some(r.output.as_str()) })
+                .is_some_and(|out| lf.contains_key(out));
+            let status = if built { "built" } else { "never built" };
+            println!("    {dep}  {status}");
+        }
+    }
+
+    Ok(())
+}
+
 fn cmd_clean() -> Result<()> {
     // Build file is optional — if absent we can still wipe the lock file.
     if let Ok(bf) = load_build_file() {
@@ -99,6 +140,14 @@ fn cmd_clean() -> Result<()> {
 }
 
 fn run() -> Result<()> {
+    // Detect `why` before full arg parsing — it takes its own positional argument.
+    let raw_argv: Vec<String> = std::env::args().skip(1).collect();
+    if raw_argv.first().map(String::as_str) == Some("why") {
+        let target = raw_argv.get(1)
+            .ok_or_else(|| anyhow::anyhow!("usage: pbuild why <target>"))?;
+        return cmd_why(target);
+    }
+
     let args = parse_args()?;
 
     if args.help {

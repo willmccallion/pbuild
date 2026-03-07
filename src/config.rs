@@ -6,6 +6,12 @@ use serde::Deserialize;
 
 use crate::types::{Rule, Target};
 
+/// Expand a list of glob patterns into concrete file paths.
+/// Exposed so callers outside `config` (e.g. `pbuild why`) can reuse it.
+pub fn expand_inputs(patterns: &[String]) -> Result<Vec<String>> {
+    expand_globs(patterns)
+}
+
 fn expand_globs(patterns: &[String]) -> Result<Vec<String>> {
     let mut paths = Vec::new();
     for pattern in patterns {
