@@ -15,12 +15,14 @@ fn run() -> Result<()> {
         .unwrap_or(4);
     let mut dry_run = false;
     let mut verbose = false;
+    let mut list = false;
     let mut target_arg: Option<String> = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "-n" | "--dry-run" => dry_run = true,
             "-v" | "--verbose" => verbose = true,
+            "-l" | "--list" => list = true,
             "-j" | "--jobs" => {
                 let val = args.next().ok_or_else(|| anyhow::anyhow!("-j requires a value"))?;
                 jobs = val.parse().context("-j requires a positive integer")?;
@@ -33,6 +35,20 @@ fn run() -> Result<()> {
     }
 
     let bf = load_build_file()?;
+
+    if list {
+        let mut names: Vec<&str> = bf.rules.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        for name in names {
+            if bf.default.as_deref() == Some(name) {
+                println!("{name} (default)");
+            } else {
+                println!("{name}");
+            }
+        }
+        return Ok(());
+    }
+
     let rules = to_rules(&bf)?;
     let root = resolve_target(&bf, target_arg.as_deref())?;
     let plan = build_plan(&rules, &root)
