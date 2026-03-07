@@ -18,6 +18,8 @@ pub struct Config {
     pub verbose: bool,
     /// Keep building independent rules after a failure.
     pub keep_going: bool,
+    /// Environment variables that trigger a full rebuild when changed.
+    pub env: Vec<String>,
 }
 
 impl Default for Config {
@@ -27,6 +29,7 @@ impl Default for Config {
             dry_run: false,
             verbose: false,
             keep_going: false,
+            env: Vec::new(),
         }
     }
 }
@@ -54,6 +57,15 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
     let lock_file: Arc<RwLock<LockFile>> = Arc::new(RwLock::new(hash::read_lock_file()?));
     let rebuilt: Arc<Mutex<HashSet<Target>>> = Arc::new(Mutex::new(HashSet::new()));
 
+    // If any tracked env var changed, treat every rule as dirty this run.
+    let env_dirty = {
+        let lf = lock_file.read().unwrap();
+        cfg.env.iter().any(|var| hash::env_is_dirty(&lf, var))
+    };
+    if env_dirty && cfg.verbose {
+        println!("[env] tracked environment variable changed — rebuilding all");
+    }
+
     // The plan is already topologically sorted (leaves first).
     // We process it in waves: collect all rules whose deps are done,
     // run them in parallel, mark them done, repeat.
@@ -79,7 +91,7 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
         let results: Vec<Result<()>> = pool.install(|| {
             ready
                 .par_iter()
-                .map(|rule| run_rule(cfg, &lock_file, &rebuilt, rule))
+                .map(|rule| run_rule(cfg, env_dirty, &lock_file, &rebuilt, rule))
                 .collect()
         });
 
@@ -105,11 +117,23 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
         anyhow::bail!("{} rule(s) failed", failures.len());
     }
 
+    // Persist env hashes so a future run can detect changes.
+    if !cfg.env.is_empty() {
+        let mut lf = lock_file.write().unwrap();
+        for var in &cfg.env {
+            if let Some(h) = hash::hash_env(var) {
+                lf.insert(hash::env_key(var), h);
+            }
+        }
+        hash::write_lock_file(&lf).context("failed to write lock file")?;
+    }
+
     Ok(())
 }
 
 fn run_rule(
     cfg: &Config,
+    env_dirty: bool,
     lock_file: &RwLock<LockFile>,
     rebuilt: &Mutex<HashSet<Target>>,
     rule: &Rule,
@@ -120,7 +144,7 @@ fn run_rule(
         rule.deps.iter().any(|d| r.contains(d))
     };
 
-    if !file_dirty && !dep_rebuilt {
+    if !file_dirty && !dep_rebuilt && !env_dirty {
         if cfg.verbose {
             println!("[skip] {}", rule.target);
         }

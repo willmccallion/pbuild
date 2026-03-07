@@ -70,6 +70,11 @@ pub struct BuildFile {
 pub struct BuildConfig {
     /// Target to build when none is specified on the CLI.
     pub default: Option<String>,
+    /// Default number of parallel jobs (overridden by `-j` on the CLI).
+    pub jobs: Option<usize>,
+    /// Environment variables that trigger a full rebuild when their value changes.
+    #[serde(default)]
+    pub env: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]

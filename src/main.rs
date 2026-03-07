@@ -10,8 +10,10 @@ use pbuild::{
 };
 
 #[allow(clippy::struct_excessive_bools)]
+#[derive(Default)]
 struct Args {
-    jobs: usize,
+    /// Explicitly set via `-j`; `None` means "not set, defer to config or default".
+    jobs: Option<usize>,
     dry_run: bool,
     verbose: bool,
     keep_going: bool,
@@ -20,21 +22,6 @@ struct Args {
     target: Option<String>,
 }
 
-impl Default for Args {
-    fn default() -> Self {
-        Args {
-            jobs: std::thread::available_parallelism()
-                .map(std::num::NonZero::get)
-                .unwrap_or(4),
-            dry_run: false,
-            verbose: false,
-            keep_going: false,
-            list: false,
-            help: false,
-            target: None,
-        }
-    }
-}
 
 fn print_help() {
     println!("\
@@ -68,10 +55,10 @@ fn parse_args() -> Result<Args> {
             "-h" | "--help"        => args.help = true,
             "-j" | "--jobs"        => {
                 let val = raw.next().ok_or_else(|| anyhow::anyhow!("-j requires a value"))?;
-                args.jobs = val.parse().context("-j requires a positive integer")?;
+                args.jobs = Some(val.parse().context("-j requires a positive integer")?);
             }
             a if a.starts_with("-j") => {
-                args.jobs = a[2..].parse().context("-j requires a positive integer")?;
+                args.jobs = Some(a[2..].parse().context("-j requires a positive integer")?);
             }
             _ => args.target = Some(arg),
         }
@@ -174,12 +161,20 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
+    let jobs = args.jobs
+        .or(bf.config.jobs)
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(std::num::NonZero::get)
+                .unwrap_or(4)
+        });
+
     let rules = to_rules(&bf)?;
     let root = resolve_target(&bf, args.target.as_deref())?;
     let plan = build_plan(&rules, &root)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let cfg = Config { jobs: args.jobs, dry_run: args.dry_run, verbose: args.verbose, keep_going: args.keep_going };
+    let cfg = Config { jobs, dry_run: args.dry_run, verbose: args.verbose, keep_going: args.keep_going, env: bf.config.env.clone() };
     execute_plan(&cfg, &plan)?;
 
     Ok(())

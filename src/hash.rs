@@ -49,6 +49,28 @@ pub fn is_dirty(lf: &LockFile, path: &str) -> io::Result<bool> {
     Ok(current.as_deref() != lf.get(path).map(String::as_str))
 }
 
+/// Hash the current value of an environment variable.
+/// Returns `None` if the variable is unset.
+#[must_use]
+pub fn hash_env(var: &str) -> Option<FileHash> {
+    let val = std::env::var(var).ok()?;
+    let digest = Sha256::digest(val.as_bytes());
+    Some(hex::encode(digest))
+}
+
+/// Lock file key for an environment variable.
+#[must_use]
+pub fn env_key(var: &str) -> String {
+    format!("env:{var}")
+}
+
+/// True if the env var's current value differs from the stored hash.
+/// An unset variable with no lock entry is clean; any other mismatch is dirty.
+pub fn env_is_dirty(lf: &LockFile, var: &str) -> bool {
+    let key = env_key(var);
+    hash_env(var).as_deref() != lf.get(&key).map(String::as_str)
+}
+
 fn parse_lock_file(s: &str) -> LockFile {
     s.lines()
         .filter_map(|line| {

@@ -50,7 +50,9 @@ pbuild clean        # delete outputs and reset the lock file
 
 ```toml
 [config]
-default = "app"          # target to build when none is specified on the CLI
+default = "app"              # target to build when none is specified on the CLI
+jobs    = 8                  # default parallelism (overridden by -j on the CLI)
+env     = ["CC", "CFLAGS"]  # env vars that trigger a full rebuild when changed
 
 [app]
 type    = "file"         # "file" (default) or "task"
@@ -59,6 +61,14 @@ deps    = ["main.o"]     # targets that must be built first
 inputs  = ["src/**/*.c"] # files that trigger a rebuild when changed (globs supported)
 output  = "app"          # file written by this rule (hashed after success)
 ```
+
+### `[config]`
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `default` | string | Target to build when none is given on the CLI |
+| `jobs` | integer | Default parallelism; overridden by `-j` |
+| `env` | string array | Environment variables that trigger a full rebuild when their value changes |
 
 ### `type`
 
@@ -70,6 +80,10 @@ output  = "app"          # file written by this rule (hashed after success)
 pbuild hashes every file listed in `inputs` before deciding whether to run a rule. If all hashes match `.pbuild.lock`, the rule is skipped. Glob patterns (`src/**/*.c`, `include/*.h`) are expanded at load time.
 
 A rule with no `inputs` always runs.
+
+### `env` tracking
+
+Environment variables listed in `[config] env` are hashed and stored in `.pbuild.lock`. If any of them change between runs, every rule rebuilds. This catches the common mistake of changing `CC` or `CFLAGS` and getting a silently stale build.
 
 ---
 
