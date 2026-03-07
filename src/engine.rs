@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use rayon::ThreadPoolBuilder;
 use rayon::prelude::*;
 
+use crate::depfile;
 use crate::hash::{self, LockFile};
 use crate::process::run_command;
 use crate::types::{Rule, Target};
@@ -138,7 +139,18 @@ fn run_rule(
     rebuilt: &Mutex<HashSet<Target>>,
     rule: &Rule,
 ) -> Result<()> {
-    let file_dirty = any_dirty(lock_file, &rule.inputs)?;
+    // Merge declared inputs with any previously discovered depfile inputs.
+    let all_inputs: Vec<String> = {
+        let lf = lock_file.read().unwrap();
+        let dep_inputs = rule.depfile.as_deref()
+            .map(|_| hash::load_depfile_inputs(&lf, &rule.output))
+            .unwrap_or_default();
+        rule.inputs.iter().cloned()
+            .chain(dep_inputs)
+            .collect()
+    };
+
+    let file_dirty = any_dirty(lock_file, &all_inputs)?;
     let dep_rebuilt = {
         let r = rebuilt.lock().unwrap();
         rule.deps.iter().any(|d| r.contains(d))
@@ -156,25 +168,45 @@ fn run_rule(
         return Ok(());
     }
 
-    println!("+ {}", rule.command.join(" "));
-    run_command(&rule.command)?;
+    // If a depfile is declared, inject -MF <path> so the compiler writes it.
+    let command: Vec<String> = match &rule.depfile {
+        Some(df) => rule.command.iter().cloned()
+            .chain(["-MF".to_string(), df.clone()])
+            .collect(),
+        None => rule.command.clone(),
+    };
 
-    // Hash inputs + output and update the in-memory lock file.
-    // The wave loop flushes it to disk once after all rules in the wave finish.
-    let paths_to_hash: Vec<&str> = rule
-        .inputs
-        .iter()
-        .map(String::as_str)
-        .chain(std::iter::once(rule.output.as_str()))
+    println!("+ {}", command.join(" "));
+    run_command(&command)?;
+
+    // Parse depfile (if any) and discover additional inputs.
+    let discovered: Vec<String> = match &rule.depfile {
+        Some(df_path) => match std::fs::read_to_string(df_path) {
+            Ok(src) => depfile::parse(&src),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => return Err(anyhow::Error::from(e))
+                .with_context(|| format!("failed to read depfile {df_path}")),
+        },
+        None => Vec::new(),
+    };
+
+    // Hash declared inputs, depfile-discovered inputs, and the output.
+    let paths_to_hash: Vec<String> = rule.inputs.iter().cloned()
+        .chain(discovered.iter().cloned())
+        .chain(std::iter::once(rule.output.clone()))
         .filter(|s| !s.is_empty())
         .collect();
 
     {
         let mut lf = lock_file.write().unwrap();
-        for path in paths_to_hash {
+        for path in &paths_to_hash {
             if let Some(h) = hash::hash_file(path)? {
-                lf.insert(path.to_string(), h);
+                lf.insert(path.clone(), h);
             }
+        }
+        // Persist the discovered paths so next run can merge them in.
+        if !discovered.is_empty() {
+            hash::store_depfile_inputs(&mut lf, &rule.output, &discovered);
         }
     }
 

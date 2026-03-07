@@ -55,6 +55,28 @@ pub fn env_key(var: &str) -> String {
     format!("env:{var}")
 }
 
+/// Lock file key for the discovered depfile inputs of a rule output.
+#[must_use]
+pub fn depfile_key(output: &str) -> String {
+    format!("dep:{output}")
+}
+
+/// Store discovered depfile paths in the lock file (tab-separated).
+pub fn store_depfile_inputs(lf: &mut LockFile, output: &str, paths: &[String]) {
+    if paths.is_empty() {
+        return;
+    }
+    lf.insert(depfile_key(output), paths.join("\t"));
+}
+
+/// Load previously discovered depfile paths from the lock file.
+#[must_use]
+pub fn load_depfile_inputs(lf: &LockFile, output: &str) -> Vec<String> {
+    lf.get(&depfile_key(output))
+        .map(|s| s.split('\t').map(String::from).collect())
+        .unwrap_or_default()
+}
+
 /// True if the env var's current value differs from the stored value.
 /// An unset variable with no lock entry is clean; any other mismatch is dirty.
 pub fn env_is_dirty(lf: &LockFile, var: &str) -> bool {

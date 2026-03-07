@@ -10,6 +10,7 @@ fn mk_task(target: Target, deps: Vec<Target>, command: Vec<&str>) -> Rule {
         deps,
         inputs: vec![],
         output: String::new(),
+        depfile: None,
         command: command.into_iter().map(ToString::to_string).collect(),
     }
 }
@@ -44,9 +45,9 @@ fn execution_order_respects_dependencies() {
     };
 
     let rules = vec![
-        Rule { target: a.clone(), deps: vec![],        inputs: vec![], output: String::new(), command: append("a") },
-        Rule { target: b.clone(), deps: vec![a.clone()], inputs: vec![], output: String::new(), command: append("b") },
-        Rule { target: c.clone(), deps: vec![b.clone()], inputs: vec![], output: String::new(), command: append("c") },
+        Rule { target: a.clone(), deps: vec![],        inputs: vec![], output: String::new(), depfile: None, command: append("a") },
+        Rule { target: b.clone(), deps: vec![a.clone()], inputs: vec![], output: String::new(), depfile: None, command: append("b") },
+        Rule { target: c.clone(), deps: vec![b.clone()], inputs: vec![], output: String::new(), depfile: None, command: append("c") },
     ];
 
     let plan = build_plan(&rules, &c).unwrap();

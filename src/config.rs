@@ -96,6 +96,8 @@ pub struct RawRule {
     pub inputs: Vec<String>,
     #[serde(default)]
     pub output: String,
+    /// Path where the compiler will write a Make-style depfile.
+    pub depfile: Option<String>,
 }
 
 /// Parse `pbuild.toml` from the current directory.
@@ -141,6 +143,7 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
                 deps,
                 inputs,
                 output: raw.output.clone(),
+                depfile: raw.depfile.clone(),
                 command: raw.command.clone(),
             })
         })

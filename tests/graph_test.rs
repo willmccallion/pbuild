@@ -7,6 +7,7 @@ fn mk_rule(target: Target, deps: Vec<Target>) -> Rule {
         deps,
         inputs: vec![],
         output: String::new(),
+        depfile: None,
         command: vec![],
     }
 }

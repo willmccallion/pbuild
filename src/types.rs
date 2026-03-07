@@ -28,6 +28,9 @@ pub struct Rule {
     pub inputs: Vec<String>,
     /// File written by the command (hashed after success; empty for tasks).
     pub output: String,
+    /// Path to a compiler-written depfile (Make format). If set, discovered
+    /// inputs are merged into the lock file and used for dirty-checking.
+    pub depfile: Option<String>,
     /// argv — e.g. `["cc", "-c", "foo.c", "-o", "foo.o"]`
     pub command: Vec<String>,
 }

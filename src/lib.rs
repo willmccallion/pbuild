@@ -9,6 +9,7 @@
 //! - [`types`] — core data types ([`types::Target`], [`types::Rule`])
 
 pub mod config;
+pub mod depfile;
 pub mod engine;
 pub mod graph;
 pub mod hash;
