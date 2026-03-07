@@ -1,0 +1,23 @@
+[package]
+name = "pbuild"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "pbuild"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pbuild"
+path = "src/main.rs"
+
+[dependencies]
+sha2 = "0.10"
+hex = "0.4"
+rayon = "1"
+anyhow = "1"
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"

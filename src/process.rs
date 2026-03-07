@@ -1,0 +1,26 @@
+use std::process::{Command, Stdio};
+
+use anyhow::{bail, Result};
+
+/// Run a command given as an argv list. Streams stdout/stderr to the terminal.
+/// Returns an error if the command exits non-zero or cannot be spawned.
+pub fn run_command(argv: &[String]) -> Result<()> {
+    let (cmd, args) = match argv {
+        [] => return Ok(()),
+        [cmd, args @ ..] => (cmd, args),
+    };
+
+    let status = Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()?;
+
+    if !status.success() {
+        let code = status.code().unwrap_or(-1);
+        bail!("command `{}` exited with status {}", argv.join(" "), code);
+    }
+
+    Ok(())
+}
