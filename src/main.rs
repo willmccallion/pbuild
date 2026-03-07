@@ -303,12 +303,16 @@ fn print_list(bf: &BuildFile) {
 
 /// Programs whose presence as the first token of a command is flagged.
 const DANGEROUS_PROGRAMS: &[&str] = &[
-    "sudo", "su", "doas", "pkexec",          // privilege escalation
-    "chmod", "chown", "chgrp",               // permission changes
-    "dd", "mkfs", "fdisk", "parted",         // disk operations
-    "passwd", "useradd", "userdel",          // user management
-    "iptables", "ip6tables", "nft",          // firewall changes
-    "curl", "wget",                          // network fetches (often piped to sh)
+    "sudo", "su", "doas", "pkexec",              // privilege escalation
+    "chmod", "chown", "chgrp",                   // permission changes
+    "dd", "mkfs", "fdisk", "parted",             // disk operations
+    "passwd", "useradd", "userdel", "usermod",   // user management
+    "iptables", "ip6tables", "nft",              // firewall changes
+    "mount", "umount",                           // filesystem mounting
+    "systemctl", "service",                      // system service control
+    "crontab",                                   // scheduled task modification
+    "at",                                        // one-off scheduled commands
+    "install",                                   // copies files + sets permissions/owner
 ];
 
 /// Shell command fragments that are flagged when `shell = true`.
@@ -317,11 +321,20 @@ const DANGEROUS_SHELL_PATTERNS: &[&str] = &[
     "rm -fr",
     "rm -f /",
     "> /dev/",
+    "> /etc/",
     "| sh",
     "| bash",
+    "| zsh",
     "| sudo",
     "eval ",
     ":(){:|:&};:",  // fork bomb
+];
+
+/// Argument prefixes that indicate a system path destination.
+/// Checked on non-shell commands where argv is unambiguous.
+const DANGEROUS_PATH_PREFIXES: &[&str] = &[
+    "/etc/", "/usr/", "/bin/", "/sbin/",
+    "/boot/", "/sys/", "/proc/", "/lib/", "/lib64/",
 ];
 
 /// Check every rule's commands for dangerous patterns.
@@ -342,6 +355,19 @@ fn safety_warnings(rules: &[pbuild::types::Rule]) -> Vec<String> {
                     warnings.push(format!(
                         "rule `{name}` runs `{prog}` which requires elevated privileges or modifies system state"
                     ));
+                }
+            }
+
+            // For non-shell commands, check arguments for system path destinations.
+            // We skip shell commands since we can't reliably parse them.
+            if !rule.shell {
+                for arg in cmd.iter().skip(1) {
+                    if DANGEROUS_PATH_PREFIXES.iter().any(|p| arg.starts_with(p)) {
+                        warnings.push(format!(
+                            "rule `{name}` writes to system path `{arg}`"
+                        ));
+                        break; // one warning per command is enough
+                    }
                 }
             }
 
