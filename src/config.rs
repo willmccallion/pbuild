@@ -71,6 +71,10 @@ pub struct BuildConfig {
     /// Environment variables that trigger a full rebuild when their value changes.
     #[serde(default)]
     pub env: Vec<String>,
+    /// Skip safety checks for dangerous commands (sudo, rm -rf, etc.).
+    /// Equivalent to passing `--trust` on the CLI.
+    #[serde(default)]
+    pub trust: bool,
 }
 
 /// Substitute `{{name}}` placeholders in `s`.

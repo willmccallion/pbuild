@@ -324,6 +324,59 @@ fn depfile_discovered_inputs_trigger_rebuild() {
 }
 
 #[test]
+fn dangerous_command_blocked_without_trust() {
+    let fx = Fixture::new();
+    fx.write("pbuild.toml", r#"
+        [config]
+        default = "install"
+
+        [install]
+        type    = "task"
+        command = ["sudo", "cp", "app", "/usr/bin/app"]
+    "#);
+
+    let out = fx.run(&[]);
+    assert!(!out.status.success(), "expected nonzero exit for dangerous command");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("unsafe"), "expected unsafe warning in stderr");
+    assert!(stderr.contains("--trust"), "expected --trust hint in stderr");
+}
+
+#[test]
+fn dangerous_command_allowed_with_trust_flag() {
+    let fx = Fixture::new();
+    fx.write("pbuild.toml", r#"
+        [config]
+        default = "run"
+
+        [run]
+        type    = "task"
+        command = ["sudo", "--version"]
+    "#);
+
+    // --trust bypasses the check; sudo --version exits 0 without a password.
+    let out = fx.run(&["--trust"]);
+    assert!(out.status.success(), "expected success with --trust");
+}
+
+#[test]
+fn dangerous_command_allowed_with_config_trust() {
+    let fx = Fixture::new();
+    fx.write("pbuild.toml", r#"
+        [config]
+        default = "run"
+        trust   = true
+
+        [run]
+        type    = "task"
+        command = ["sudo", "--version"]
+    "#);
+
+    let out = fx.run(&[]);
+    assert!(out.status.success(), "expected success with config trust = true");
+}
+
+#[test]
 fn shell_true_enables_shell_features() {
     let fx = Fixture::new();
     fx.write("pbuild.toml", r#"

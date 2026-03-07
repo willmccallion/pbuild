@@ -21,6 +21,7 @@ struct Args {
     keep_going: bool,
     list: bool,
     help: bool,
+    trust: bool,
     target: Option<String>,
 }
 
@@ -38,6 +39,7 @@ Options:
   -v, --verbose        Print skipped rules
   -l, --list           List all available targets and exit
   -h, --help           Print this help and exit
+      --trust          Skip safety checks for dangerous commands (sudo, rm -rf, etc.)
 
 Special targets:
   init                 Write a starter pbuild.toml in the current directory
@@ -57,6 +59,7 @@ fn parse_args() -> Result<Args> {
             "-k" | "--keep-going" => args.keep_going = true,
             "-l" | "--list" => args.list = true,
             "-h" | "--help" => args.help = true,
+            "--trust" => args.trust = true,
             "-j" | "--jobs" => {
                 let val = raw
                     .next()
@@ -298,6 +301,67 @@ fn print_list(bf: &BuildFile) {
     }
 }
 
+/// Programs whose presence as the first token of a command is flagged.
+const DANGEROUS_PROGRAMS: &[&str] = &[
+    "sudo", "su", "doas", "pkexec",          // privilege escalation
+    "chmod", "chown", "chgrp",               // permission changes
+    "dd", "mkfs", "fdisk", "parted",         // disk operations
+    "passwd", "useradd", "userdel",          // user management
+    "iptables", "ip6tables", "nft",          // firewall changes
+    "curl", "wget",                          // network fetches (often piped to sh)
+];
+
+/// Shell command fragments that are flagged when `shell = true`.
+const DANGEROUS_SHELL_PATTERNS: &[&str] = &[
+    "rm -rf",
+    "rm -fr",
+    "rm -f /",
+    "> /dev/",
+    "| sh",
+    "| bash",
+    "| sudo",
+    "eval ",
+    ":(){:|:&};:",  // fork bomb
+];
+
+/// Check every rule's commands for dangerous patterns.
+/// Returns a list of human-readable warnings (one per offending command).
+fn safety_warnings(rules: &[pbuild::types::Rule]) -> Vec<String> {
+    let mut warnings = Vec::new();
+
+    for rule in rules {
+        let name = &rule.target;
+        for cmd in &rule.commands {
+            // Check first token against the dangerous programs list.
+            if let Some(program) = cmd.first() {
+                let prog = std::path::Path::new(program)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(program);
+                if DANGEROUS_PROGRAMS.contains(&prog) {
+                    warnings.push(format!(
+                        "rule `{name}` runs `{prog}` which requires elevated privileges or modifies system state"
+                    ));
+                }
+            }
+
+            // For shell rules, scan the joined command string for dangerous patterns.
+            if rule.shell {
+                let joined = cmd.join(" ");
+                for pattern in DANGEROUS_SHELL_PATTERNS {
+                    if joined.contains(pattern) {
+                        warnings.push(format!(
+                            "rule `{name}` contains `{pattern}` in a shell command"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    warnings
+}
+
 fn run() -> Result<()> {
     // Detect `why` before full arg parsing — it takes its own positional argument.
     let raw_argv: Vec<String> = std::env::args().skip(1).collect();
@@ -337,6 +401,18 @@ fn run() -> Result<()> {
     });
 
     let rules = to_rules(&bf)?;
+
+    if !args.trust && !bf.config.trust {
+        let warnings = safety_warnings(&rules);
+        if !warnings.is_empty() {
+            for w in &warnings {
+                eprintln!("pbuild: unsafe: {w}");
+            }
+            eprintln!("pbuild: refusing to run. review the commands and pass --trust to proceed.");
+            return Err(anyhow::anyhow!("unsafe commands detected"));
+        }
+    }
+
     let root = resolve_target(&bf, args.target.as_deref())?;
     let plan = build_plan(&rules, &root).map_err(|e| anyhow::anyhow!("{e}"))?;
 
