@@ -100,7 +100,9 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
 
         for (rule, res) in ready.iter().zip(results) {
             match res.with_context(|| format!("rule failed for target: {}", rule.target)) {
-                Ok(()) => { done.insert(rule.target.clone()); }
+                Ok(()) => {
+                    done.insert(rule.target.clone());
+                }
                 Err(e) if cfg.keep_going => {
                     ui::print_fail(&rule.target);
                     eprintln!("pbuild: {e}");
@@ -111,8 +113,7 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
         }
 
         // Flush lock file once per wave rather than after every rule.
-        hash::write_lock_file(&lock_file.read().unwrap())
-            .context("failed to write lock file")?;
+        hash::write_lock_file(&lock_file.read().unwrap()).context("failed to write lock file")?;
 
         remaining = not_ready;
     }
@@ -145,12 +146,12 @@ fn run_rule(
     // Merge declared inputs with any previously discovered depfile inputs.
     let all_inputs: Vec<String> = {
         let lf = lock_file.read().unwrap();
-        let dep_inputs = rule.depfile.as_deref()
+        let dep_inputs = rule
+            .depfile
+            .as_deref()
             .map(|_| hash::load_depfile_inputs(&lf, &rule.output))
             .unwrap_or_default();
-        rule.inputs.iter().cloned()
-            .chain(dep_inputs)
-            .collect()
+        rule.inputs.iter().cloned().chain(dep_inputs).collect()
     };
 
     let file_dirty = any_dirty(lock_file, &all_inputs)?;
@@ -169,16 +170,23 @@ fn run_rule(
     // Build the final command list, injecting -MF into the last command if
     // a depfile is declared (mirrors compiler convention: flags come last).
     let last_idx = rule.commands.len() - 1;
-    let commands: Vec<Vec<String>> = rule.commands.iter().enumerate().map(|(i, cmd)| {
-        if i == last_idx {
-            if let Some(df) = &rule.depfile {
-                return cmd.iter().cloned()
-                    .chain(["-MF".to_string(), df.clone()])
-                    .collect();
+    let commands: Vec<Vec<String>> = rule
+        .commands
+        .iter()
+        .enumerate()
+        .map(|(i, cmd)| {
+            if i == last_idx {
+                if let Some(df) = &rule.depfile {
+                    return cmd
+                        .iter()
+                        .cloned()
+                        .chain(["-MF".to_string(), df.clone()])
+                        .collect();
+                }
             }
-        }
-        cmd.clone()
-    }).collect();
+            cmd.clone()
+        })
+        .collect();
 
     if cfg.dry_run {
         for cmd in &commands {
@@ -199,14 +207,19 @@ fn run_rule(
         Some(df_path) => match std::fs::read_to_string(df_path) {
             Ok(src) => depfile::parse(&src),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-            Err(e) => return Err(anyhow::Error::from(e))
-                .with_context(|| format!("failed to read depfile {df_path}")),
+            Err(e) => {
+                return Err(anyhow::Error::from(e))
+                    .with_context(|| format!("failed to read depfile {df_path}"));
+            }
         },
         None => Vec::new(),
     };
 
     // Hash declared inputs, depfile-discovered inputs, and the output.
-    let paths_to_hash: Vec<String> = rule.inputs.iter().cloned()
+    let paths_to_hash: Vec<String> = rule
+        .inputs
+        .iter()
+        .cloned()
         .chain(discovered.iter().cloned())
         .chain(std::iter::once(rule.output.clone()))
         .filter(|s| !s.is_empty())

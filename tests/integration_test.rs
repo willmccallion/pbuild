@@ -22,7 +22,9 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        Fixture { dir: TempDir::new().unwrap() }
+        Fixture {
+            dir: TempDir::new().unwrap(),
+        }
     }
 
     fn write(&self, name: &str, contents: &str) {
@@ -79,7 +81,10 @@ fn cold_build_runs_rule() {
     fx.write("src.txt", "hello");
 
     let out = fx.run_ok(&[]);
-    assert!(out.contains("echo built"), "expected command in output, got: {out}");
+    assert!(
+        out.contains("echo built"),
+        "expected command in output, got: {out}"
+    );
     assert!(fx.exists("out.txt"));
 }
 
@@ -89,9 +94,12 @@ fn second_build_skips_unchanged_rule() {
     fx.write("pbuild.toml", SIMPLE_TOML);
     fx.write("src.txt", "hello");
 
-    fx.run_ok(&[]);  // cold build
-    let out = fx.run_ok(&["--verbose"]);  // nothing changed
-    assert!(out.contains("[skip]"), "expected skip on second build, got: {out}");
+    fx.run_ok(&[]); // cold build
+    let out = fx.run_ok(&["--verbose"]); // nothing changed
+    assert!(
+        out.contains("[skip]"),
+        "expected skip on second build, got: {out}"
+    );
 }
 
 #[test]
@@ -100,13 +108,16 @@ fn modifying_input_triggers_rebuild() {
     fx.write("pbuild.toml", SIMPLE_TOML);
     fx.write("src.txt", "hello");
 
-    fx.run_ok(&[]);  // cold build
+    fx.run_ok(&[]); // cold build
 
     // Modify the input.
     fs::write(fx.path("src.txt"), "world").unwrap();
 
     let out = fx.run_ok(&[]);
-    assert!(out.contains("echo built"), "expected rebuild after input change, got: {out}");
+    assert!(
+        out.contains("echo built"),
+        "expected rebuild after input change, got: {out}"
+    );
 }
 
 #[test]
@@ -116,14 +127,58 @@ fn dry_run_prints_command_without_creating_output() {
     fx.write("src.txt", "hello");
 
     let out = fx.run_ok(&["--dry-run"]);
-    assert!(out.contains("echo built"), "expected command in dry-run output, got: {out}");
-    assert!(!fx.exists("out.txt"), "dry-run must not create output files");
+    assert!(
+        out.contains("echo built"),
+        "expected command in dry-run output, got: {out}"
+    );
+    assert!(
+        !fx.exists("out.txt"),
+        "dry-run must not create output files"
+    );
+}
+
+#[test]
+fn list_shows_groups_and_descriptions() {
+    let fx = Fixture::new();
+    fx.write(
+        "pbuild.toml",
+        r#"
+        [config]
+        default = "build"
+
+        [build]
+        group       = "Build"
+        description = "Compile everything"
+        type        = "task"
+        command     = ["true"]
+
+        [test]
+        group       = "Quality"
+        description = "Run tests"
+        type        = "task"
+        command     = ["true"]
+
+        [clean]
+        type    = "task"
+        command = ["true"]
+    "#,
+    );
+
+    let out = fx.run_ok(&["--list"]);
+    assert!(out.contains("Build"), "expected group header");
+    assert!(out.contains("Compile everything"), "expected description");
+    assert!(out.contains("(default)"), "expected default marker");
+    assert!(out.contains("Quality"), "expected Quality group");
+    assert!(out.contains("Other"), "expected ungrouped under Other");
+    assert!(out.contains("clean"), "expected ungrouped rule");
 }
 
 #[test]
 fn list_shows_all_targets() {
     let fx = Fixture::new();
-    fx.write("pbuild.toml", r#"
+    fx.write(
+        "pbuild.toml",
+        r#"
         [config]
         default = "all"
 
@@ -134,7 +189,8 @@ fn list_shows_all_targets() {
         ["foo.o"]
         command = ["true"]
         output  = "foo.o"
-    "#);
+    "#,
+    );
 
     let out = fx.run_ok(&["--list"]);
     assert!(out.contains("all"), "expected `all` in list output");
@@ -148,7 +204,7 @@ fn clean_removes_output_and_lock_file() {
     fx.write("pbuild.toml", SIMPLE_TOML);
     fx.write("src.txt", "hello");
 
-    fx.run_ok(&[]);  // build to produce outputs
+    fx.run_ok(&[]); // build to produce outputs
     assert!(fx.exists("out.txt"));
     assert!(fx.exists(".pbuild.lock"));
 
@@ -164,13 +220,18 @@ fn unknown_target_exits_nonzero() {
     fx.write("src.txt", "hello");
 
     let out = fx.run(&["ghost"]);
-    assert!(!out.status.success(), "expected nonzero exit for unknown target");
+    assert!(
+        !out.status.success(),
+        "expected nonzero exit for unknown target"
+    );
 }
 
 #[test]
 fn dep_chain_builds_in_order() {
     let fx = Fixture::new();
-    fx.write("pbuild.toml", r#"
+    fx.write(
+        "pbuild.toml",
+        r#"
         [config]
         default = "final.txt"
 
@@ -184,7 +245,8 @@ fn dep_chain_builds_in_order() {
         deps    = ["mid.txt"]
         inputs  = ["mid.txt"]
         output  = "final.txt"
-    "#);
+    "#,
+    );
     fx.write("src.txt", "hello");
 
     fx.run_ok(&[]);
@@ -195,17 +257,23 @@ fn dep_chain_builds_in_order() {
 #[test]
 fn failed_rule_exits_nonzero() {
     let fx = Fixture::new();
-    fx.write("pbuild.toml", r#"
+    fx.write(
+        "pbuild.toml",
+        r#"
         [config]
         default = "fail"
 
         [fail]
         type    = "task"
         command = ["false"]
-    "#);
+    "#,
+    );
 
     let out = fx.run(&[]);
-    assert!(!out.status.success(), "expected nonzero exit when rule fails");
+    assert!(
+        !out.status.success(),
+        "expected nonzero exit when rule fails"
+    );
 }
 
 #[test]
@@ -214,7 +282,9 @@ fn depfile_discovered_inputs_trigger_rebuild() {
 
     // A script that produces the output AND writes a depfile listing a header.
     // pbuild injects -MF automatically, so we read it from the last two args.
-    fx.write("pbuild.toml", r#"
+    fx.write(
+        "pbuild.toml",
+        r#"
         [config]
         default = "out.o"
 
@@ -223,30 +293,42 @@ fn depfile_discovered_inputs_trigger_rebuild() {
         inputs  = ["src.c"]
         output  = "out.o"
         depfile = "out.d"
-    "#);
+    "#,
+    );
     fx.write("src.c", "// source");
     fx.write("header.h", "// header v1");
     // build.sh simulates a compiler: writes the output and a depfile.
     // pbuild appends `-MF out.d` to the command, so $3/$4 are -MF and out.d.
-    fx.write("build.sh", "touch out.o && echo \"out.o: src.c header.h\" > $2\n");
+    fx.write(
+        "build.sh",
+        "touch out.o && echo \"out.o: src.c header.h\" > $2\n",
+    );
 
     // Cold build — discovers header.h via depfile.
     fx.run_ok(&[]);
 
     // Second build — nothing changed, should skip.
     let out = fx.run_ok(&["--verbose"]);
-    assert!(out.contains("[skip]"), "expected skip when nothing changed: {out}");
+    assert!(
+        out.contains("[skip]"),
+        "expected skip when nothing changed: {out}"
+    );
 
     // Modify the discovered header — should trigger a rebuild.
     fs::write(fx.path("header.h"), "// header v2").unwrap();
     let out = fx.run_ok(&[]);
-    assert!(out.contains("build.sh"), "expected rebuild after header change: {out}");
+    assert!(
+        out.contains("build.sh"),
+        "expected rebuild after header change: {out}"
+    );
 }
 
 #[test]
 fn multi_step_commands_run_in_order() {
     let fx = Fixture::new();
-    fx.write("pbuild.toml", r#"
+    fx.write(
+        "pbuild.toml",
+        r#"
         [config]
         default = "setup"
 
@@ -257,7 +339,8 @@ fn multi_step_commands_run_in_order() {
             ["sh", "-c", "echo step2 >> log.txt"],
             ["sh", "-c", "echo step3 >> log.txt"],
         ]
-    "#);
+    "#,
+    );
 
     fx.run_ok(&[]);
 
@@ -268,7 +351,9 @@ fn multi_step_commands_run_in_order() {
 #[test]
 fn multi_step_fails_on_first_error() {
     let fx = Fixture::new();
-    fx.write("pbuild.toml", r#"
+    fx.write(
+        "pbuild.toml",
+        r#"
         [config]
         default = "run"
 
@@ -279,7 +364,8 @@ fn multi_step_fails_on_first_error() {
             ["false"],
             ["sh", "-c", "echo after >> log.txt"],
         ]
-    "#);
+    "#,
+    );
 
     let out = fx.run(&[]);
     assert!(!out.status.success(), "expected failure when a step fails");
@@ -291,7 +377,9 @@ fn multi_step_fails_on_first_error() {
 #[test]
 fn vars_substituted_in_command() {
     let fx = Fixture::new();
-    fx.write("pbuild.toml", r#"
+    fx.write(
+        "pbuild.toml",
+        r#"
         [config]
         default = "greet"
 
@@ -301,10 +389,14 @@ fn vars_substituted_in_command() {
         [greet]
         type    = "task"
         command = ["sh", "-c", "echo {{greeting}}"]
-    "#);
+    "#,
+    );
 
     let out = fx.run_ok(&[]);
-    assert!(out.contains("hello"), "expected var substitution in output, got: {out}");
+    assert!(
+        out.contains("hello"),
+        "expected var substitution in output, got: {out}"
+    );
 }
 
 #[test]
@@ -312,7 +404,9 @@ fn depfile_mf_flag_injected_automatically() {
     let fx = Fixture::new();
 
     // Verify that pbuild injects -MF <path> by checking the args the script receives.
-    fx.write("pbuild.toml", r#"
+    fx.write(
+        "pbuild.toml",
+        r#"
         [config]
         default = "out.o"
 
@@ -321,14 +415,24 @@ fn depfile_mf_flag_injected_automatically() {
         inputs  = ["src.c"]
         output  = "out.o"
         depfile = "out.d"
-    "#);
+    "#,
+    );
     fx.write("src.c", "// source");
     // Record all args to a file so we can inspect them.
-    fx.write("build.sh", "echo \"$@\" > args.txt && touch out.o && echo 'out.o: src.c' > $2\n");
+    fx.write(
+        "build.sh",
+        "echo \"$@\" > args.txt && touch out.o && echo 'out.o: src.c' > $2\n",
+    );
 
     fx.run_ok(&[]);
 
     let args = fs::read_to_string(fx.path("args.txt")).unwrap();
-    assert!(args.contains("-MF"), "expected -MF in injected args: {args}");
-    assert!(args.contains("out.d"), "expected depfile path in injected args: {args}");
+    assert!(
+        args.contains("-MF"),
+        "expected -MF in injected args: {args}"
+    );
+    assert!(
+        args.contains("out.d"),
+        "expected depfile path in injected args: {args}"
+    );
 }

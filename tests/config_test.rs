@@ -22,12 +22,16 @@ fn glob_inputs_expand_to_matching_files() {
         fs::create_dir(dir.path().join("src")).unwrap();
         fs::write(dir.path().join("src/a.c"), "").unwrap();
         fs::write(dir.path().join("src/b.c"), "").unwrap();
-        fs::write(dir.path().join("pbuild.toml"), r#"
+        fs::write(
+            dir.path().join("pbuild.toml"),
+            r#"
             [app]
             command = ["cc", "-o", "app"]
             inputs  = ["src/*.c"]
             output  = "app"
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         let bf = load_build_file().unwrap();
         let rules = to_rules(&bf).unwrap();
@@ -40,12 +44,16 @@ fn glob_inputs_expand_to_matching_files() {
 #[test]
 fn literal_input_preserved_when_no_match() {
     in_tempdir(|_dir| {
-        fs::write("pbuild.toml", r#"
+        fs::write(
+            "pbuild.toml",
+            r#"
             [app]
             command = ["cc", "-o", "app"]
             inputs  = ["src/missing.c"]
             output  = "app"
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         let bf = load_build_file().unwrap();
         let rules = to_rules(&bf).unwrap();
@@ -56,7 +64,9 @@ fn literal_input_preserved_when_no_match() {
 #[test]
 fn vars_substituted_in_command() {
     in_tempdir(|_dir| {
-        fs::write("pbuild.toml", r#"
+        fs::write(
+            "pbuild.toml",
+            r#"
             [vars]
             cargo = "cargo"
             profile = "release"
@@ -64,7 +74,9 @@ fn vars_substituted_in_command() {
             [build]
             type    = "task"
             command = ["{{cargo}}", "build", "--{{profile}}"]
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         let bf = load_build_file().unwrap();
         let rules = to_rules(&bf).unwrap();
@@ -76,11 +88,15 @@ fn vars_substituted_in_command() {
 fn vars_fall_back_to_env() {
     in_tempdir(|_dir| {
         // PATH is always set — use it as a known-present env var.
-        fs::write("pbuild.toml", r#"
+        fs::write(
+            "pbuild.toml",
+            r#"
             [build]
             type    = "task"
             command = ["echo", "{{PATH}}"]
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         let bf = load_build_file().unwrap();
         let rules = to_rules(&bf).unwrap();
@@ -93,11 +109,15 @@ fn vars_fall_back_to_env() {
 #[test]
 fn unknown_var_left_as_is() {
     in_tempdir(|_dir| {
-        fs::write("pbuild.toml", r#"
+        fs::write(
+            "pbuild.toml",
+            r#"
             [build]
             type    = "task"
             command = ["{{no_such_var}}", "build"]
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         let bf = load_build_file().unwrap();
         let rules = to_rules(&bf).unwrap();
@@ -108,12 +128,16 @@ fn unknown_var_left_as_is() {
 #[test]
 fn invalid_glob_pattern_returns_err() {
     in_tempdir(|_dir| {
-        fs::write("pbuild.toml", r#"
+        fs::write(
+            "pbuild.toml",
+            r#"
             [app]
             command = ["cc", "-o", "app"]
             inputs  = ["src/[invalid"]
             output  = "app"
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         let bf = load_build_file().unwrap();
         assert!(to_rules(&bf).is_err());

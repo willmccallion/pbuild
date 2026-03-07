@@ -33,4 +33,8 @@ pub struct Rule {
     /// One or more commands to run sequentially.
     /// Each inner `Vec<String>` is a single argv.
     pub commands: Vec<Vec<String>>,
+    /// Short description shown in `--list` output.
+    pub description: Option<String>,
+    /// Group heading for `--list` output (e.g. "Build", "Quality").
+    pub group: Option<String>,
 }

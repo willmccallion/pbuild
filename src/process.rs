@@ -1,6 +1,6 @@
 use std::process::{Command, Stdio};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 /// Run a command given as an argv list. Streams stdout/stderr to the terminal.
 /// Returns an error if the command exits non-zero or cannot be spawned.

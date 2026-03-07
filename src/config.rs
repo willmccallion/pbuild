@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 use crate::types::{Rule, Target};
@@ -85,7 +85,9 @@ fn interpolate(vars: &HashMap<String, String>, s: &str) -> String {
     let mut pos = 0;
     while let Some(rel_start) = out[pos..].find("{{") {
         let abs_start = pos + rel_start;
-        let Some(rel_end) = out[abs_start..].find("}}") else { break };
+        let Some(rel_end) = out[abs_start..].find("}}") else {
+            break;
+        };
         let abs_end = abs_start + rel_end;
         let key = &out[abs_start + 2..abs_end];
         // Resolution order: [vars] table → environment → leave as-is.
@@ -133,6 +135,10 @@ pub struct RawRule {
     pub output: String,
     /// Path where the compiler will write a Make-style depfile.
     pub depfile: Option<String>,
+    /// Short description shown in `--list` output.
+    pub description: Option<String>,
+    /// Group heading for `--list` output.
+    pub group: Option<String>,
 }
 
 /// Parse `pbuild.toml` from the current directory.
@@ -140,8 +146,7 @@ pub struct RawRule {
 /// The file is a flat TOML table where `[config]` holds build metadata and
 /// every other top-level table is treated as a rule.
 pub fn load_build_file() -> Result<BuildFile> {
-    let src = fs::read_to_string("pbuild.toml")
-        .context("could not read pbuild.toml")?;
+    let src = fs::read_to_string("pbuild.toml").context("could not read pbuild.toml")?;
 
     let mut table: toml::Table = toml::from_str(&src).context("invalid pbuild.toml")?;
 
@@ -158,13 +163,18 @@ pub fn load_build_file() -> Result<BuildFile> {
     let rules = table
         .into_iter()
         .map(|(name, value)| {
-            let raw: RawRule = value.try_into()
+            let raw: RawRule = value
+                .try_into()
                 .with_context(|| format!("invalid rule `{name}`"))?;
             Ok((name, raw))
         })
         .collect::<Result<HashMap<_, _>>>()?;
 
-    Ok(BuildFile { config, vars, rules })
+    Ok(BuildFile {
+        config,
+        vars,
+        rules,
+    })
 }
 
 /// Convert a `BuildFile` into a flat list of `Rule`s.
@@ -197,6 +207,8 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
                 output: interpolate(&bf.vars, &raw.output),
                 depfile: raw.depfile.as_deref().map(|s| interpolate(&bf.vars, s)),
                 commands,
+                description: raw.description.clone(),
+                group: raw.group.clone(),
             })
         })
         .collect()

@@ -9,6 +9,8 @@ fn mk_rule(target: Target, deps: Vec<Target>) -> Rule {
         output: String::new(),
         depfile: None,
         commands: vec![vec!["true".to_string()]],
+        description: None,
+        group: None,
     }
 }
 
@@ -24,7 +26,10 @@ fn single_rule_no_deps() {
 fn linear_chain_resolves_in_order() {
     let a = Target::File("a.o".into());
     let b = Target::File("b".into());
-    let rules = vec![mk_rule(a.clone(), vec![]), mk_rule(b.clone(), vec![a.clone()])];
+    let rules = vec![
+        mk_rule(a.clone(), vec![]),
+        mk_rule(b.clone(), vec![a.clone()]),
+    ];
     let plan = build_plan(&rules, &b).unwrap();
     let targets: Vec<_> = plan.iter().map(|r| r.target.clone()).collect();
     assert_eq!(targets, [a, b]);
@@ -33,14 +38,14 @@ fn linear_chain_resolves_in_order() {
 #[test]
 fn diamond_dep_included_exactly_once() {
     let shared = Target::File("shared.o".into());
-    let left   = Target::File("left.o".into());
-    let right  = Target::File("right.o".into());
-    let root   = Target::File("root".into());
+    let left = Target::File("left.o".into());
+    let right = Target::File("right.o".into());
+    let root = Target::File("root".into());
     let rules = vec![
         mk_rule(shared.clone(), vec![]),
-        mk_rule(left.clone(),   vec![shared.clone()]),
-        mk_rule(right.clone(),  vec![shared.clone()]),
-        mk_rule(root.clone(),   vec![left.clone(), right.clone()]),
+        mk_rule(left.clone(), vec![shared.clone()]),
+        mk_rule(right.clone(), vec![shared.clone()]),
+        mk_rule(root.clone(), vec![left.clone(), right.clone()]),
     ];
     let plan = build_plan(&rules, &root).unwrap();
     let targets: Vec<_> = plan.iter().map(|r| r.target.clone()).collect();
@@ -50,15 +55,21 @@ fn diamond_dep_included_exactly_once() {
     let idx = |t: &Target| targets.iter().position(|x| x == t).unwrap();
     assert!(idx(&shared) < idx(&left));
     assert!(idx(&shared) < idx(&right));
-    assert!(idx(&left)   < idx(&root));
-    assert!(idx(&right)  < idx(&root));
+    assert!(idx(&left) < idx(&root));
+    assert!(idx(&right) < idx(&root));
 }
 
 #[test]
 fn missing_dep_returns_err() {
-    let rules = vec![mk_rule(Target::File("foo".into()), vec![Target::File("missing.o".into())])];
+    let rules = vec![mk_rule(
+        Target::File("foo".into()),
+        vec![Target::File("missing.o".into())],
+    )];
     let err = build_plan(&rules, &Target::File("foo".into())).unwrap_err();
-    assert!(err.contains("missing.o") || err.contains("No rule"), "{err}");
+    assert!(
+        err.contains("missing.o") || err.contains("No rule"),
+        "{err}"
+    );
 }
 
 #[test]

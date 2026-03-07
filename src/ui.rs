@@ -9,18 +9,48 @@ fn colors() -> bool {
 }
 
 // ANSI codes
-const GREEN:  &str = "\x1b[32m";
+const GREEN: &str = "\x1b[32m";
 const YELLOW: &str = "\x1b[33m";
-const RED:    &str = "\x1b[31m";
-const DIM:    &str = "\x1b[2m";
-const BOLD:   &str = "\x1b[1m";
-const RESET:  &str = "\x1b[0m";
+const RED: &str = "\x1b[31m";
+const DIM: &str = "\x1b[2m";
+const BOLD: &str = "\x1b[1m";
+const RESET: &str = "\x1b[0m";
 
-fn green(s: &str)  -> String { if colors() { format!("{GREEN}{s}{RESET}") } else { s.to_string() } }
-fn yellow(s: &str) -> String { if colors() { format!("{YELLOW}{s}{RESET}") } else { s.to_string() } }
-fn red(s: &str)    -> String { if colors() { format!("{RED}{s}{RESET}") } else { s.to_string() } }
-fn dim(s: &str)    -> String { if colors() { format!("{DIM}{s}{RESET}") } else { s.to_string() } }
-fn bold(s: &str)   -> String { if colors() { format!("{BOLD}{s}{RESET}") } else { s.to_string() } }
+fn green(s: &str) -> String {
+    if colors() {
+        format!("{GREEN}{s}{RESET}")
+    } else {
+        s.to_string()
+    }
+}
+fn yellow(s: &str) -> String {
+    if colors() {
+        format!("{YELLOW}{s}{RESET}")
+    } else {
+        s.to_string()
+    }
+}
+fn red(s: &str) -> String {
+    if colors() {
+        format!("{RED}{s}{RESET}")
+    } else {
+        s.to_string()
+    }
+}
+fn dim(s: &str) -> String {
+    if colors() {
+        format!("{DIM}{s}{RESET}")
+    } else {
+        s.to_string()
+    }
+}
+fn bold(s: &str) -> String {
+    if colors() {
+        format!("{BOLD}{s}{RESET}")
+    } else {
+        s.to_string()
+    }
+}
 
 /// Print the command being run: `  + cargo build --release`
 pub fn print_command(cmd: &[String]) {
@@ -51,5 +81,8 @@ pub fn print_fail(target: &impl std::fmt::Display) {
 
 /// Print the env-dirty notice.
 pub fn print_env_dirty() {
-    println!("{}", yellow("[env] tracked environment variable changed — rebuilding all"));
+    println!(
+        "{}",
+        yellow("[env] tracked environment variable changed — rebuilding all")
+    );
 }

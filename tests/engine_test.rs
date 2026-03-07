@@ -1,4 +1,4 @@
-use pbuild::engine::{execute_plan, Config};
+use pbuild::engine::{Config, execute_plan};
 use pbuild::graph::build_plan;
 use pbuild::hash::is_dirty;
 use pbuild::types::{Rule, Target};
@@ -12,11 +12,16 @@ fn mk_task(target: Target, deps: Vec<Target>, command: Vec<&str>) -> Rule {
         output: String::new(),
         depfile: None,
         commands: vec![command.into_iter().map(ToString::to_string).collect()],
+        description: None,
+        group: None,
     }
 }
 
 fn serial_cfg() -> Config {
-    Config { jobs: 1, ..Default::default() }
+    Config {
+        jobs: 1,
+        ..Default::default()
+    }
 }
 
 #[test]
@@ -41,13 +46,44 @@ fn execution_order_respects_dependencies() {
     let c = Target::Task("c".into());
 
     let append = |name: &str| {
-        vec!["sh".to_string(), "-c".to_string(), format!("echo {} >> {}", name, log_path)]
+        vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            format!("echo {} >> {}", name, log_path),
+        ]
     };
 
     let rules = vec![
-        Rule { target: a.clone(), deps: vec![],        inputs: vec![], output: String::new(), depfile: None, commands: vec![append("a")] },
-        Rule { target: b.clone(), deps: vec![a.clone()], inputs: vec![], output: String::new(), depfile: None, commands: vec![append("b")] },
-        Rule { target: c.clone(), deps: vec![b.clone()], inputs: vec![], output: String::new(), depfile: None, commands: vec![append("c")] },
+        Rule {
+            target: a.clone(),
+            deps: vec![],
+            inputs: vec![],
+            output: String::new(),
+            depfile: None,
+            commands: vec![append("a")],
+            description: None,
+            group: None,
+        },
+        Rule {
+            target: b.clone(),
+            deps: vec![a.clone()],
+            inputs: vec![],
+            output: String::new(),
+            depfile: None,
+            commands: vec![append("b")],
+            description: None,
+            group: None,
+        },
+        Rule {
+            target: c.clone(),
+            deps: vec![b.clone()],
+            inputs: vec![],
+            output: String::new(),
+            depfile: None,
+            commands: vec![append("c")],
+            description: None,
+            group: None,
+        },
     ];
 
     let plan = build_plan(&rules, &c).unwrap();
@@ -81,17 +117,25 @@ fn keep_going_runs_independent_rules_after_failure() {
     // Without -k, `root` would never run and neither would `ok` (if `fail` is first).
     // With -k, `ok` must run even though `fail` fails.
     let fail = Target::Task("fail".into());
-    let ok   = Target::Task("ok".into());
+    let ok = Target::Task("ok".into());
     let root = Target::Task("root".into());
 
     let rules = vec![
         mk_task(fail.clone(), vec![], vec!["false"]),
-        mk_task(ok.clone(),   vec![], vec!["sh", "-c", &format!("echo ok >> {log_path}")]),
+        mk_task(
+            ok.clone(),
+            vec![],
+            vec!["sh", "-c", &format!("echo ok >> {log_path}")],
+        ),
         mk_task(root.clone(), vec![fail.clone(), ok.clone()], vec!["true"]),
     ];
 
     let plan = build_plan(&rules, &root).unwrap();
-    let cfg = Config { jobs: 1, keep_going: true, ..Default::default() };
+    let cfg = Config {
+        jobs: 1,
+        keep_going: true,
+        ..Default::default()
+    };
     let err = execute_plan(&cfg, &plan).unwrap_err();
 
     // Build must have failed overall.

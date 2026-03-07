@@ -1,10 +1,12 @@
 use std::fs;
 use std::process::ExitCode;
 
+use std::collections::BTreeMap;
+
 use anyhow::{Context, Result};
 use pbuild::{
-    config::{expand_inputs, load_build_file, resolve_target, to_rules},
-    engine::{execute_plan, Config},
+    config::{BuildFile, expand_inputs, load_build_file, resolve_target, to_rules},
+    engine::{Config, execute_plan},
     graph::build_plan,
     hash,
 };
@@ -22,9 +24,9 @@ struct Args {
     target: Option<String>,
 }
 
-
 fn print_help() {
-    println!("\
+    println!(
+        "\
 Usage: pbuild [OPTIONS] [TARGET]
        pbuild clean
        pbuild why <TARGET>
@@ -39,7 +41,8 @@ Options:
 
 Special targets:
   clean                Delete all rule outputs and .pbuild.lock
-  why <TARGET>         Explain why a target would rebuild");
+  why <TARGET>         Explain why a target would rebuild"
+    );
 }
 
 fn parse_args() -> Result<Args> {
@@ -48,13 +51,15 @@ fn parse_args() -> Result<Args> {
 
     while let Some(arg) = raw.next() {
         match arg.as_str() {
-            "-n" | "--dry-run"     => args.dry_run = true,
-            "-v" | "--verbose"     => args.verbose = true,
-            "-k" | "--keep-going"  => args.keep_going = true,
-            "-l" | "--list"        => args.list = true,
-            "-h" | "--help"        => args.help = true,
-            "-j" | "--jobs"        => {
-                let val = raw.next().ok_or_else(|| anyhow::anyhow!("-j requires a value"))?;
+            "-n" | "--dry-run" => args.dry_run = true,
+            "-v" | "--verbose" => args.verbose = true,
+            "-k" | "--keep-going" => args.keep_going = true,
+            "-l" | "--list" => args.list = true,
+            "-h" | "--help" => args.help = true,
+            "-j" | "--jobs" => {
+                let val = raw
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("-j requires a value"))?;
                 args.jobs = Some(val.parse().context("-j requires a positive integer")?);
             }
             a if a.starts_with("-j") => {
@@ -69,7 +74,10 @@ fn parse_args() -> Result<Args> {
 
 fn remove_if_exists(path: &str) -> Result<()> {
     match fs::remove_file(path) {
-        Ok(()) => { println!("rm {path}"); Ok(()) }
+        Ok(()) => {
+            println!("rm {path}");
+            Ok(())
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e).with_context(|| format!("failed to remove {path}")),
     }
@@ -77,7 +85,9 @@ fn remove_if_exists(path: &str) -> Result<()> {
 
 fn cmd_why(target_name: &str) -> Result<()> {
     let bf = load_build_file()?;
-    let raw = bf.rules.get(target_name)
+    let raw = bf
+        .rules
+        .get(target_name)
         .ok_or_else(|| anyhow::anyhow!("no rule for target: {target_name}"))?;
 
     let lf = hash::read_lock_file().context("could not read .pbuild.lock")?;
@@ -86,7 +96,9 @@ fn cmd_why(target_name: &str) -> Result<()> {
     println!("target: {target_name}");
 
     // Merge declared inputs with depfile-discovered inputs from the lock file.
-    let discovered = raw.depfile.as_deref()
+    let discovered = raw
+        .depfile
+        .as_deref()
         .map(|_| hash::load_depfile_inputs(&lf, &raw.output))
         .unwrap_or_default();
 
@@ -96,9 +108,9 @@ fn cmd_why(target_name: &str) -> Result<()> {
         println!("  inputs:");
         for path in &inputs {
             let status = match hash::is_dirty(&lf, path) {
-                Ok(true)  => "CHANGED",
+                Ok(true) => "CHANGED",
                 Ok(false) => "clean",
-                Err(e)    => return Err(e).with_context(|| format!("could not hash {path}")),
+                Err(e) => return Err(e).with_context(|| format!("could not hash {path}")),
             };
             println!("    {path}  {status}");
         }
@@ -106,9 +118,9 @@ fn cmd_why(target_name: &str) -> Result<()> {
             println!("  depfile inputs (auto-discovered):");
             for path in &discovered {
                 let status = match hash::is_dirty(&lf, path) {
-                    Ok(true)  => "CHANGED",
+                    Ok(true) => "CHANGED",
                     Ok(false) => "clean",
-                    Err(e)    => return Err(e).with_context(|| format!("could not hash {path}")),
+                    Err(e) => return Err(e).with_context(|| format!("could not hash {path}")),
                 };
                 println!("    {path}  {status}");
             }
@@ -118,8 +130,16 @@ fn cmd_why(target_name: &str) -> Result<()> {
     if !raw.deps.is_empty() {
         println!("  deps:");
         for dep in &raw.deps {
-            let built = bf.rules.get(dep.as_str())
-                .and_then(|r| if r.output.is_empty() { None } else { Some(r.output.as_str()) })
+            let built = bf
+                .rules
+                .get(dep.as_str())
+                .and_then(|r| {
+                    if r.output.is_empty() {
+                        None
+                    } else {
+                        Some(r.output.as_str())
+                    }
+                })
                 .is_some_and(|out| lf.contains_key(out));
             let status = if built { "built" } else { "never built" };
             println!("    {dep}  {status}");
@@ -130,18 +150,18 @@ fn cmd_why(target_name: &str) -> Result<()> {
         println!("  env:");
         for var in &bf.config.env {
             let current = std::env::var(var).ok();
-            let stored  = hash::env_stored_value(&lf, var);
-            let dirty   = current.as_deref() != stored;
+            let stored = hash::env_stored_value(&lf, var);
+            let dirty = current.as_deref() != stored;
 
             let current_display = match &current {
                 Some(v) => format!("{var}={v}"),
-                None    => format!("{var} (unset)"),
+                None => format!("{var} (unset)"),
             };
 
             if dirty {
                 let was = match stored {
                     Some(v) => format!("was: {v}"),
-                    None    => "was: unset".to_string(),
+                    None => "was: unset".to_string(),
                 };
                 println!("    {current_display}  CHANGED ({was})");
             } else {
@@ -166,11 +186,64 @@ fn cmd_clean() -> Result<()> {
     remove_if_exists(".pbuild.lock")
 }
 
+fn print_list(bf: &BuildFile) {
+    // Collect entries, sorted by name within each group.
+    // Group key: explicit group name, or "" (shown last as ungrouped).
+    let mut groups: BTreeMap<&str, Vec<(&str, &pbuild::config::RawRule)>> = BTreeMap::new();
+    let mut sorted: Vec<(&str, &pbuild::config::RawRule)> =
+        bf.rules.iter().map(|(k, v)| (k.as_str(), v)).collect();
+    sorted.sort_by_key(|(name, _)| *name);
+
+    for (name, raw) in &sorted {
+        let group = raw.group.as_deref().unwrap_or("");
+        groups.entry(group).or_default().push((name, raw));
+    }
+
+    // Compute column width for alignment across all entries.
+    let col_width = sorted.iter().map(|(n, _)| n.len()).max().unwrap_or(0) + 2;
+
+    // Print ungrouped first (empty key sorts first in BTreeMap), then named groups.
+    // We want named groups first, ungrouped last — collect and reorder.
+    let mut ungrouped = None;
+    let mut named: Vec<(&str, &Vec<(&str, &pbuild::config::RawRule)>)> = Vec::new();
+    for (group, entries) in &groups {
+        if group.is_empty() {
+            ungrouped = Some(entries);
+        } else {
+            named.push((group, entries));
+        }
+    }
+
+    let print_entries = |entries: &Vec<(&str, &pbuild::config::RawRule)>| {
+        for (name, raw) in entries {
+            let is_default = bf.config.default.as_deref() == Some(name);
+            let suffix = if is_default { "  (default)" } else { "" };
+            if let Some(desc) = &raw.description {
+                println!("  {name:<col_width$}{desc}{suffix}");
+            } else {
+                println!("  {name}{suffix}");
+            }
+        }
+    };
+
+    for (group, entries) in &named {
+        println!("{group}");
+        print_entries(entries);
+    }
+    if let Some(entries) = ungrouped {
+        if !named.is_empty() {
+            println!("Other");
+        }
+        print_entries(entries);
+    }
+}
+
 fn run() -> Result<()> {
     // Detect `why` before full arg parsing — it takes its own positional argument.
     let raw_argv: Vec<String> = std::env::args().skip(1).collect();
     if raw_argv.first().map(String::as_str) == Some("why") {
-        let target = raw_argv.get(1)
+        let target = raw_argv
+            .get(1)
             .ok_or_else(|| anyhow::anyhow!("usage: pbuild why <target>"))?;
         return cmd_why(target);
     }
@@ -189,32 +262,27 @@ fn run() -> Result<()> {
     let bf = load_build_file()?;
 
     if args.list {
-        let mut names: Vec<&str> = bf.rules.keys().map(String::as_str).collect();
-        names.sort_unstable();
-        for name in names {
-            if bf.config.default.as_deref() == Some(name) {
-                println!("{name} (default)");
-            } else {
-                println!("{name}");
-            }
-        }
+        print_list(&bf);
         return Ok(());
     }
 
-    let jobs = args.jobs
-        .or(bf.config.jobs)
-        .unwrap_or_else(|| {
-            std::thread::available_parallelism()
-                .map(std::num::NonZero::get)
-                .unwrap_or(4)
-        });
+    let jobs = args.jobs.or(bf.config.jobs).unwrap_or_else(|| {
+        std::thread::available_parallelism()
+            .map(std::num::NonZero::get)
+            .unwrap_or(4)
+    });
 
     let rules = to_rules(&bf)?;
     let root = resolve_target(&bf, args.target.as_deref())?;
-    let plan = build_plan(&rules, &root)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let plan = build_plan(&rules, &root).map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let cfg = Config { jobs, dry_run: args.dry_run, verbose: args.verbose, keep_going: args.keep_going, env: bf.config.env.clone() };
+    let cfg = Config {
+        jobs,
+        dry_run: args.dry_run,
+        verbose: args.verbose,
+        keep_going: args.keep_going,
+        env: bf.config.env.clone(),
+    };
     execute_plan(&cfg, &plan)?;
 
     Ok(())
