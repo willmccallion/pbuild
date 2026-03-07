@@ -7,10 +7,12 @@ use pbuild::{
     graph::build_plan,
 };
 
+#[allow(clippy::struct_excessive_bools)]
 struct Args {
     jobs: usize,
     dry_run: bool,
     verbose: bool,
+    keep_going: bool,
     list: bool,
     target: Option<String>,
 }
@@ -23,6 +25,7 @@ impl Default for Args {
                 .unwrap_or(4),
             dry_run: false,
             verbose: false,
+            keep_going: false,
             list: false,
             target: None,
         }
@@ -35,10 +38,11 @@ fn parse_args() -> Result<Args> {
 
     while let Some(arg) = raw.next() {
         match arg.as_str() {
-            "-n" | "--dry-run" => args.dry_run = true,
-            "-v" | "--verbose" => args.verbose = true,
-            "-l" | "--list"   => args.list = true,
-            "-j" | "--jobs"   => {
+            "-n" | "--dry-run"     => args.dry_run = true,
+            "-v" | "--verbose"     => args.verbose = true,
+            "-k" | "--keep-going"  => args.keep_going = true,
+            "-l" | "--list"        => args.list = true,
+            "-j" | "--jobs"        => {
                 let val = raw.next().ok_or_else(|| anyhow::anyhow!("-j requires a value"))?;
                 args.jobs = val.parse().context("-j requires a positive integer")?;
             }
@@ -74,7 +78,7 @@ fn run() -> Result<()> {
     let plan = build_plan(&rules, &root)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let cfg = Config { jobs: args.jobs, dry_run: args.dry_run, verbose: args.verbose };
+    let cfg = Config { jobs: args.jobs, dry_run: args.dry_run, verbose: args.verbose, keep_going: args.keep_going };
     execute_plan(&cfg, &plan)?;
 
     Ok(())

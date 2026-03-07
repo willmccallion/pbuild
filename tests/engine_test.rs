@@ -67,6 +67,41 @@ fn rules_with_no_inputs_always_run() {
 }
 
 #[test]
+fn keep_going_runs_independent_rules_after_failure() {
+    let log = NamedTempFile::new().unwrap();
+    let log_path = log.path().to_str().unwrap().to_string();
+
+    // Graph: `fail` and `ok` are both independent leaves; `root` depends on both.
+    //
+    //   fail  ok
+    //     \  /
+    //     root
+    //
+    // Without -k, `root` would never run and neither would `ok` (if `fail` is first).
+    // With -k, `ok` must run even though `fail` fails.
+    let fail = Target::Task("fail".into());
+    let ok   = Target::Task("ok".into());
+    let root = Target::Task("root".into());
+
+    let rules = vec![
+        mk_task(fail.clone(), vec![], vec!["false"]),
+        mk_task(ok.clone(),   vec![], vec!["sh", "-c", &format!("echo ok >> {log_path}")]),
+        mk_task(root.clone(), vec![fail.clone(), ok.clone()], vec!["true"]),
+    ];
+
+    let plan = build_plan(&rules, &root).unwrap();
+    let cfg = Config { jobs: 1, keep_going: true, ..Default::default() };
+    let err = execute_plan(&cfg, &plan).unwrap_err();
+
+    // Build must have failed overall.
+    assert!(err.to_string().contains("1 rule(s) failed"), "{err}");
+
+    // But `ok` must have run.
+    let contents = std::fs::read_to_string(log.path()).unwrap();
+    assert!(contents.contains("ok"), "expected `ok` to have run");
+}
+
+#[test]
 fn missing_input_file_is_always_dirty() {
     let lf = std::collections::HashMap::from([(
         "/tmp/pbuild-nonexistent-xyz".to_string(),

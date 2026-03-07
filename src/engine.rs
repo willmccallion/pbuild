@@ -16,6 +16,8 @@ pub struct Config {
     pub dry_run: bool,
     /// Print [skip] lines and extra info.
     pub verbose: bool,
+    /// Keep building independent rules after a failure.
+    pub keep_going: bool,
 }
 
 impl Default for Config {
@@ -24,6 +26,7 @@ impl Default for Config {
             jobs: 4,
             dry_run: false,
             verbose: false,
+            keep_going: false,
         }
     }
 }
@@ -56,16 +59,20 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
     // run them in parallel, mark them done, repeat.
     let mut done: HashSet<Target> = HashSet::new();
     let mut remaining: Vec<&Rule> = rules.iter().collect();
+    let mut failures: Vec<anyhow::Error> = Vec::new();
 
     while !remaining.is_empty() {
-        // Collect the ready wave.
+        // Collect the ready wave — skip rules whose deps failed.
         let (ready, not_ready): (Vec<_>, Vec<_>) = remaining
             .into_iter()
             .partition(|r| r.deps.iter().all(|d| done.contains(d)));
 
         if ready.is_empty() {
-            // Shouldn't happen if the plan is correctly sorted, but guard anyway.
-            anyhow::bail!("dependency deadlock — build plan may be invalid");
+            if failures.is_empty() {
+                anyhow::bail!("dependency deadlock — build plan may be invalid");
+            }
+            // Remaining rules are blocked by failed deps; stop here.
+            break;
         }
 
         // Run the wave in parallel (bounded by the thread pool).
@@ -76,10 +83,15 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
                 .collect()
         });
 
-        // Propagate any errors.
         for (rule, res) in ready.iter().zip(results) {
-            res.with_context(|| format!("rule failed for target: {}", rule.target))?;
-            done.insert(rule.target.clone());
+            match res.with_context(|| format!("rule failed for target: {}", rule.target)) {
+                Ok(()) => { done.insert(rule.target.clone()); }
+                Err(e) if cfg.keep_going => {
+                    eprintln!("pbuild: {e}");
+                    failures.push(e);
+                }
+                Err(e) => return Err(e),
+            }
         }
 
         // Flush lock file once per wave rather than after every rule.
@@ -87,6 +99,10 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
             .context("failed to write lock file")?;
 
         remaining = not_ready;
+    }
+
+    if !failures.is_empty() {
+        anyhow::bail!("{} rule(s) failed", failures.len());
     }
 
     Ok(())
