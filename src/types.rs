@@ -30,6 +30,7 @@ pub struct Rule {
     /// Path to a compiler-written depfile (Make format). If set, discovered
     /// inputs are merged into the lock file and used for dirty-checking.
     pub depfile: Option<String>,
-    /// argv — e.g. `["cc", "-c", "foo.c", "-o", "foo.o"]`
-    pub command: Vec<String>,
+    /// One or more commands to run sequentially.
+    /// Each inner `Vec<String>` is a single argv.
+    pub commands: Vec<Vec<String>>,
 }

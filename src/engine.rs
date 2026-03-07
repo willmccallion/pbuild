@@ -166,22 +166,32 @@ fn run_rule(
         return Ok(());
     }
 
-    // If a depfile is declared, inject -MF <path> so the compiler writes it.
-    let command: Vec<String> = match &rule.depfile {
-        Some(df) => rule.command.iter().cloned()
-            .chain(["-MF".to_string(), df.clone()])
-            .collect(),
-        None => rule.command.clone(),
-    };
+    // Build the final command list, injecting -MF into the last command if
+    // a depfile is declared (mirrors compiler convention: flags come last).
+    let last_idx = rule.commands.len() - 1;
+    let commands: Vec<Vec<String>> = rule.commands.iter().enumerate().map(|(i, cmd)| {
+        if i == last_idx {
+            if let Some(df) = &rule.depfile {
+                return cmd.iter().cloned()
+                    .chain(["-MF".to_string(), df.clone()])
+                    .collect();
+            }
+        }
+        cmd.clone()
+    }).collect();
 
     if cfg.dry_run {
-        ui::print_dry_run(&command);
+        for cmd in &commands {
+            ui::print_dry_run(cmd);
+        }
         return Ok(());
     }
 
-    ui::print_command(&command);
     let start = Instant::now();
-    run_command(&command)?;
+    for cmd in &commands {
+        ui::print_command(cmd);
+        run_command(cmd)?;
+    }
     ui::print_done(&rule.target, start.elapsed());
 
     // Parse depfile (if any) and discover additional inputs.

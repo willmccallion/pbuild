@@ -68,7 +68,7 @@ fn vars_substituted_in_command() {
 
         let bf = load_build_file().unwrap();
         let rules = to_rules(&bf).unwrap();
-        assert_eq!(rules[0].command, ["cargo", "build", "--release"]);
+        assert_eq!(rules[0].commands[0], ["cargo", "build", "--release"]);
     });
 }
 
@@ -86,7 +86,7 @@ fn vars_fall_back_to_env() {
         let rules = to_rules(&bf).unwrap();
         // If the env fallback works, the placeholder is replaced with the real PATH value.
         let path_val = std::env::var("PATH").unwrap();
-        assert_eq!(rules[0].command[1], path_val);
+        assert_eq!(rules[0].commands[0][1], path_val);
     });
 }
 
@@ -101,7 +101,7 @@ fn unknown_var_left_as_is() {
 
         let bf = load_build_file().unwrap();
         let rules = to_rules(&bf).unwrap();
-        assert_eq!(rules[0].command[0], "{{no_such_var}}");
+        assert_eq!(rules[0].commands[0][0], "{{no_such_var}}");
     });
 }
 

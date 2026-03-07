@@ -244,6 +244,51 @@ fn depfile_discovered_inputs_trigger_rebuild() {
 }
 
 #[test]
+fn multi_step_commands_run_in_order() {
+    let fx = Fixture::new();
+    fx.write("pbuild.toml", r#"
+        [config]
+        default = "setup"
+
+        [setup]
+        type     = "task"
+        commands = [
+            ["sh", "-c", "echo step1 >> log.txt"],
+            ["sh", "-c", "echo step2 >> log.txt"],
+            ["sh", "-c", "echo step3 >> log.txt"],
+        ]
+    "#);
+
+    fx.run_ok(&[]);
+
+    let log = fs::read_to_string(fx.path("log.txt")).unwrap();
+    assert_eq!(log.trim(), "step1\nstep2\nstep3");
+}
+
+#[test]
+fn multi_step_fails_on_first_error() {
+    let fx = Fixture::new();
+    fx.write("pbuild.toml", r#"
+        [config]
+        default = "run"
+
+        [run]
+        type     = "task"
+        commands = [
+            ["sh", "-c", "echo before >> log.txt"],
+            ["false"],
+            ["sh", "-c", "echo after >> log.txt"],
+        ]
+    "#);
+
+    let out = fx.run(&[]);
+    assert!(!out.status.success(), "expected failure when a step fails");
+    // The third step must not have run.
+    let log = fs::read_to_string(fx.path("log.txt")).unwrap_or_default();
+    assert!(!log.contains("after"), "steps after a failure must not run");
+}
+
+#[test]
 fn vars_substituted_in_command() {
     let fx = Fixture::new();
     fx.write("pbuild.toml", r#"

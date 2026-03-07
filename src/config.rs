@@ -119,7 +119,12 @@ pub enum RawTargetType {
 pub struct RawRule {
     #[serde(rename = "type", default)]
     pub kind: RawTargetType,
+    /// Single command shorthand: `command = ["cc", "-o", "app"]`
+    #[serde(default)]
     pub command: Vec<String>,
+    /// Multi-step commands: `commands = [["step1"], ["step2"]]`
+    #[serde(default)]
+    pub commands: Vec<Vec<String>>,
     #[serde(default)]
     pub deps: Vec<String>,
     #[serde(default)]
@@ -173,13 +178,25 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
             let deps = raw.deps.iter().map(|d| resolve_dep(bf, d)).collect();
             let inputs = expand_globs(&interpolate_vec(&bf.vars, &raw.inputs))
                 .with_context(|| format!("rule `{name}`: failed to expand inputs"))?;
+            // Merge `command` (single) and `commands` (multi-step) into one list.
+            // `command` is prepended if both are specified.
+            let mut commands: Vec<Vec<String>> = Vec::new();
+            if !raw.command.is_empty() {
+                commands.push(interpolate_vec(&bf.vars, &raw.command));
+            }
+            for cmd in &raw.commands {
+                commands.push(interpolate_vec(&bf.vars, cmd));
+            }
+            if commands.is_empty() {
+                anyhow::bail!("rule `{name}` has no command");
+            }
             Ok(Rule {
                 target,
                 deps,
                 inputs,
                 output: interpolate(&bf.vars, &raw.output),
                 depfile: raw.depfile.as_deref().map(|s| interpolate(&bf.vars, s)),
-                command: interpolate_vec(&bf.vars, &raw.command),
+                commands,
             })
         })
         .collect()
