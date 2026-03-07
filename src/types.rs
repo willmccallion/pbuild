@@ -11,8 +11,7 @@ pub enum Target {
 impl std::fmt::Display for Target {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Target::File(p) => write!(f, "File({p})"),
-            Target::Task(n) => write!(f, "Task({n})"),
+            Target::File(p) | Target::Task(p) => write!(f, "{p}"),
         }
     }
 }

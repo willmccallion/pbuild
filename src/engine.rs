@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use rayon::ThreadPoolBuilder;
@@ -9,6 +10,7 @@ use crate::depfile;
 use crate::hash::{self, LockFile};
 use crate::process::run_command;
 use crate::types::{Rule, Target};
+use crate::ui;
 
 pub struct Config {
     /// Max concurrent rules.
@@ -64,7 +66,7 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
         cfg.env.iter().any(|var| hash::env_is_dirty(&lf, var))
     };
     if env_dirty && cfg.verbose {
-        println!("[env] tracked environment variable changed — rebuilding all");
+        ui::print_env_dirty();
     }
 
     // The plan is already topologically sorted (leaves first).
@@ -100,6 +102,7 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
             match res.with_context(|| format!("rule failed for target: {}", rule.target)) {
                 Ok(()) => { done.insert(rule.target.clone()); }
                 Err(e) if cfg.keep_going => {
+                    ui::print_fail(&rule.target);
                     eprintln!("pbuild: {e}");
                     failures.push(e);
                 }
@@ -158,13 +161,8 @@ fn run_rule(
 
     if !file_dirty && !dep_rebuilt && !env_dirty {
         if cfg.verbose {
-            println!("[skip] {}", rule.target);
+            ui::print_skip(&rule.target);
         }
-        return Ok(());
-    }
-
-    if cfg.dry_run {
-        println!("{}", rule.command.join(" "));
         return Ok(());
     }
 
@@ -176,8 +174,15 @@ fn run_rule(
         None => rule.command.clone(),
     };
 
-    println!("+ {}", command.join(" "));
+    if cfg.dry_run {
+        ui::print_dry_run(&command);
+        return Ok(());
+    }
+
+    ui::print_command(&command);
+    let start = Instant::now();
     run_command(&command)?;
+    ui::print_done(&rule.target, start.elapsed());
 
     // Parse depfile (if any) and discover additional inputs.
     let discovered: Vec<String> = match &rule.depfile {

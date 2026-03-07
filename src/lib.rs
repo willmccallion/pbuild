@@ -7,6 +7,7 @@
 //! - [`hash`] — SHA-256 file hashing and `.pbuild.lock` persistence
 //! - [`process`] — subprocess runner
 //! - [`types`] — core data types ([`types::Target`], [`types::Rule`])
+//! - [`ui`] — colored terminal output and build timing
 
 pub mod config;
 pub mod depfile;
@@ -15,3 +16,4 @@ pub mod graph;
 pub mod hash;
 pub mod process;
 pub mod types;
+pub mod ui;
