@@ -169,7 +169,7 @@ fn parse_ui_config(table: &mut toml::Table) -> Result<crate::ui::UiConfig> {
         });
     };
     let t: toml::Table = val.try_into().context("invalid [ui] section")?;
-    let color = t.get("color").and_then(|v| v.as_bool());
+    let color = t.get("color").and_then(toml::Value::as_bool);
     let prefix = t
         .get("prefix")
         .and_then(|v| v.as_str())
