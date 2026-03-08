@@ -24,7 +24,9 @@ pub fn run_command(argv: &[String], dir: Option<&str>) -> Result<()> {
     let status = cmd.status()?;
 
     if !status.success() {
-        let code = status.code().map_or("signal".to_string(), |c| c.to_string());
+        let code = status
+            .code()
+            .map_or("signal".to_string(), |c| c.to_string());
         bail!("exited {code}: {}", argv.join(" "));
     }
 

@@ -35,7 +35,11 @@ impl Default for Config {
             verbose: false,
             keep_going: false,
             env: Vec::new(),
-            ui: UiConfig { color: None, prefix: None, log: None },
+            ui: UiConfig {
+                color: None,
+                prefix: None,
+                log: None,
+            },
         }
     }
 }
@@ -269,7 +273,9 @@ pub fn check_status(rules: &[Rule]) -> Result<Vec<(String, bool)>> {
     for rule in rules {
         let all_inputs: Vec<String> = {
             let lf = lock_file.read().unwrap();
-            let dep_inputs = rule.depfile.as_deref()
+            let dep_inputs = rule
+                .depfile
+                .as_deref()
                 .map(|_| hash::load_depfile_inputs(&lf, &rule.output))
                 .unwrap_or_default();
             rule.inputs.iter().cloned().chain(dep_inputs).collect()

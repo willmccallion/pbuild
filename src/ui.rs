@@ -43,11 +43,21 @@ impl UiConfig {
         }
     }
 
-    fn green<'a>(&self, s: &'a str)  -> std::borrow::Cow<'a, str> { self.c("\x1b[32m", s) }
-    fn yellow<'a>(&self, s: &'a str) -> std::borrow::Cow<'a, str> { self.c("\x1b[33m", s) }
-    fn red<'a>(&self, s: &'a str)    -> std::borrow::Cow<'a, str> { self.c("\x1b[31m", s) }
-    fn dim<'a>(&self, s: &'a str)    -> std::borrow::Cow<'a, str> { self.c("\x1b[2m",  s) }
-    fn bold<'a>(&self, s: &'a str)   -> std::borrow::Cow<'a, str> { self.c("\x1b[1m",  s) }
+    fn green<'a>(&self, s: &'a str) -> std::borrow::Cow<'a, str> {
+        self.c("\x1b[32m", s)
+    }
+    fn yellow<'a>(&self, s: &'a str) -> std::borrow::Cow<'a, str> {
+        self.c("\x1b[33m", s)
+    }
+    fn red<'a>(&self, s: &'a str) -> std::borrow::Cow<'a, str> {
+        self.c("\x1b[31m", s)
+    }
+    fn dim<'a>(&self, s: &'a str) -> std::borrow::Cow<'a, str> {
+        self.c("\x1b[2m", s)
+    }
+    fn bold<'a>(&self, s: &'a str) -> std::borrow::Cow<'a, str> {
+        self.c("\x1b[1m", s)
+    }
 
     fn log(&self, line: &str) {
         if let Some(f) = &self.log {

@@ -162,12 +162,23 @@ pub struct RawRule {
 
 fn parse_ui_config(table: &mut toml::Table) -> Result<crate::ui::UiConfig> {
     let Some(val) = table.remove("ui") else {
-        return Ok(crate::ui::UiConfig { color: None, prefix: None, log: None });
+        return Ok(crate::ui::UiConfig {
+            color: None,
+            prefix: None,
+            log: None,
+        });
     };
     let t: toml::Table = val.try_into().context("invalid [ui] section")?;
     let color = t.get("color").and_then(|v| v.as_bool());
-    let prefix = t.get("prefix").and_then(|v| v.as_str()).map(ToString::to_string);
-    Ok(crate::ui::UiConfig { color, prefix, log: None })
+    let prefix = t
+        .get("prefix")
+        .and_then(|v| v.as_str())
+        .map(ToString::to_string);
+    Ok(crate::ui::UiConfig {
+        color,
+        prefix,
+        log: None,
+    })
 }
 
 /// Parse `pbuild.toml` from the current directory.
@@ -239,7 +250,10 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
                 deps,
                 inputs,
                 output: interpolate(&bf.vars, &raw.output, true),
-                depfile: raw.depfile.as_deref().map(|s| interpolate(&bf.vars, s, true)),
+                depfile: raw
+                    .depfile
+                    .as_deref()
+                    .map(|s| interpolate(&bf.vars, s, true)),
                 commands,
                 shell: raw.shell,
                 dir: raw.dir.as_deref().map(|s| interpolate(&bf.vars, s, true)),

@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use anyhow::{Context, Result};
 use pbuild::{
     config::{BuildFile, expand_inputs, load_build_file, resolve_target, to_rules},
-    engine::{check_status, Config, execute_plan},
+    engine::{Config, check_status, execute_plan},
     graph::build_plan,
     hash,
 };
@@ -66,7 +66,7 @@ fn parse_args() -> Result<Args> {
             "-l" | "--list" => args.list = true,
             "-h" | "--help" => args.help = true,
             "--trust" => args.trust = true,
-            "--only"  => args.only = true,
+            "--only" => args.only = true,
             "--log" => {
                 let val = raw
                     .next()
@@ -334,16 +334,31 @@ fn print_list(bf: &BuildFile) {
 
 /// Programs whose presence as the first token of a command is flagged.
 const DANGEROUS_PROGRAMS: &[&str] = &[
-    "sudo", "su", "doas", "pkexec",              // privilege escalation
-    "chmod", "chown", "chgrp",                   // permission changes
-    "dd", "mkfs", "fdisk", "parted",             // disk operations
-    "passwd", "useradd", "userdel", "usermod",   // user management
-    "iptables", "ip6tables", "nft",              // firewall changes
-    "mount", "umount",                           // filesystem mounting
-    "systemctl", "service",                      // system service control
-    "crontab",                                   // scheduled task modification
-    "at",                                        // one-off scheduled commands
-    "install",                                   // copies files + sets permissions/owner
+    "sudo",
+    "su",
+    "doas",
+    "pkexec", // privilege escalation
+    "chmod",
+    "chown",
+    "chgrp", // permission changes
+    "dd",
+    "mkfs",
+    "fdisk",
+    "parted", // disk operations
+    "passwd",
+    "useradd",
+    "userdel",
+    "usermod", // user management
+    "iptables",
+    "ip6tables",
+    "nft", // firewall changes
+    "mount",
+    "umount", // filesystem mounting
+    "systemctl",
+    "service", // system service control
+    "crontab", // scheduled task modification
+    "at",      // one-off scheduled commands
+    "install", // copies files + sets permissions/owner
 ];
 
 /// Shell command fragments that are flagged when `shell = true`.
@@ -358,14 +373,13 @@ const DANGEROUS_SHELL_PATTERNS: &[&str] = &[
     "| zsh",
     "| sudo",
     "eval ",
-    ":(){:|:&};:",  // fork bomb
+    ":(){:|:&};:", // fork bomb
 ];
 
 /// Argument prefixes that indicate a system path destination.
 /// Checked on non-shell commands where argv is unambiguous.
 const DANGEROUS_PATH_PREFIXES: &[&str] = &[
-    "/etc/", "/usr/", "/bin/", "/sbin/",
-    "/boot/", "/sys/", "/proc/", "/lib/", "/lib64/",
+    "/etc/", "/usr/", "/bin/", "/sbin/", "/boot/", "/sys/", "/proc/", "/lib/", "/lib64/",
 ];
 
 /// Check every rule's commands for dangerous patterns.
@@ -394,9 +408,7 @@ fn safety_warnings(rules: &[pbuild::types::Rule]) -> Vec<String> {
             if !rule.shell {
                 for arg in cmd.iter().skip(1) {
                     if DANGEROUS_PATH_PREFIXES.iter().any(|p| arg.starts_with(p)) {
-                        warnings.push(format!(
-                            "rule `{name}` writes to system path `{arg}`"
-                        ));
+                        warnings.push(format!("rule `{name}` writes to system path `{arg}`"));
                         break; // one warning per command is enough
                     }
                 }
@@ -476,13 +488,17 @@ fn run() -> Result<()> {
 
     let root = resolve_target(&bf, args.target.as_deref())?;
 
-    let log_file = args.log.as_deref().map(|path| {
-        fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .with_context(|| format!("failed to open log file: {path}"))
-    }).transpose()?;
+    let log_file = args
+        .log
+        .as_deref()
+        .map(|path| {
+            fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .with_context(|| format!("failed to open log file: {path}"))
+        })
+        .transpose()?;
 
     let ui = pbuild::ui::UiConfig {
         log: log_file.map(|f| Arc::new(Mutex::new(f))),
@@ -501,9 +517,13 @@ fn run() -> Result<()> {
     let plan = if args.only {
         // Run just the single target — no dependency resolution.
         // Clear deps so the wave scheduler doesn't wait for them.
-        rules.into_iter()
+        rules
+            .into_iter()
             .find(|r| r.target == root)
-            .map(|mut r| { r.deps.clear(); vec![r] })
+            .map(|mut r| {
+                r.deps.clear();
+                vec![r]
+            })
             .ok_or_else(|| anyhow::anyhow!("no rule for target: {root}"))?
     } else {
         build_plan(&rules, &root).map_err(|e| anyhow::anyhow!("{e}"))?

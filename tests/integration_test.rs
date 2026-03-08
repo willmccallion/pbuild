@@ -326,33 +326,48 @@ fn depfile_discovered_inputs_trigger_rebuild() {
 #[test]
 fn dangerous_command_blocked_without_trust() {
     let fx = Fixture::new();
-    fx.write("pbuild.toml", r#"
+    fx.write(
+        "pbuild.toml",
+        r#"
         [config]
         default = "install"
 
         [install]
         type    = "task"
         command = ["sudo", "cp", "app", "/usr/bin/app"]
-    "#);
+    "#,
+    );
 
     let out = fx.run(&[]);
-    assert!(!out.status.success(), "expected nonzero exit for dangerous command");
+    assert!(
+        !out.status.success(),
+        "expected nonzero exit for dangerous command"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("unsafe"), "expected unsafe warning in stderr");
-    assert!(stderr.contains("--trust"), "expected --trust hint in stderr");
+    assert!(
+        stderr.contains("unsafe"),
+        "expected unsafe warning in stderr"
+    );
+    assert!(
+        stderr.contains("--trust"),
+        "expected --trust hint in stderr"
+    );
 }
 
 #[test]
 fn dangerous_command_allowed_with_trust_flag() {
     let fx = Fixture::new();
-    fx.write("pbuild.toml", r#"
+    fx.write(
+        "pbuild.toml",
+        r#"
         [config]
         default = "run"
 
         [run]
         type    = "task"
         command = ["sudo", "--version"]
-    "#);
+    "#,
+    );
 
     // --trust bypasses the check; sudo --version exits 0 without a password.
     let out = fx.run(&["--trust"]);
@@ -362,7 +377,9 @@ fn dangerous_command_allowed_with_trust_flag() {
 #[test]
 fn dangerous_command_allowed_with_config_trust() {
     let fx = Fixture::new();
-    fx.write("pbuild.toml", r#"
+    fx.write(
+        "pbuild.toml",
+        r#"
         [config]
         default = "run"
         trust   = true
@@ -370,10 +387,14 @@ fn dangerous_command_allowed_with_config_trust() {
         [run]
         type    = "task"
         command = ["sudo", "--version"]
-    "#);
+    "#,
+    );
 
     let out = fx.run(&[]);
-    assert!(out.status.success(), "expected success with config trust = true");
+    assert!(
+        out.status.success(),
+        "expected success with config trust = true"
+    );
 }
 
 #[test]
@@ -384,25 +405,36 @@ fn status_shows_dirty_and_clean() {
 
     // Before build: dirty.
     let out = fx.run_ok(&["status"]);
-    assert!(out.contains("dirty"), "expected dirty before build, got: {out}");
+    assert!(
+        out.contains("dirty"),
+        "expected dirty before build, got: {out}"
+    );
 
     // Build.
     fx.run_ok(&[]);
 
     // After build: clean.
     let out = fx.run_ok(&["status"]);
-    assert!(out.contains("clean"), "expected clean after build, got: {out}");
+    assert!(
+        out.contains("clean"),
+        "expected clean after build, got: {out}"
+    );
 
     // Modify input: dirty again.
     fs::write(fx.path("src.txt"), "world").unwrap();
     let out = fx.run_ok(&["status"]);
-    assert!(out.contains("dirty"), "expected dirty after input change, got: {out}");
+    assert!(
+        out.contains("dirty"),
+        "expected dirty after input change, got: {out}"
+    );
 }
 
 #[test]
 fn only_flag_skips_deps() {
     let fx = Fixture::new();
-    fx.write("pbuild.toml", r#"
+    fx.write(
+        "pbuild.toml",
+        r#"
         [config]
         default = "final.txt"
 
@@ -416,7 +448,8 @@ fn only_flag_skips_deps() {
         deps    = ["mid.txt"]
         inputs  = ["mid.txt"]
         output  = "final.txt"
-    "#);
+    "#,
+    );
     fx.write("src.txt", "hello");
 
     // --only final.txt should run without building mid.txt first.
@@ -428,8 +461,10 @@ fn only_flag_skips_deps() {
 #[test]
 fn dir_field_sets_working_directory() {
     let fx = Fixture::new();
-    fx.write("sub/pbuild.toml", "");  // create subdirectory
-    fx.write("pbuild.toml", r#"
+    fx.write("sub/pbuild.toml", ""); // create subdirectory
+    fx.write(
+        "pbuild.toml",
+        r#"
         [config]
         default = "run"
 
@@ -437,17 +472,23 @@ fn dir_field_sets_working_directory() {
         type    = "task"
         dir     = "sub"
         command = ["sh", "-c", "pwd > ../out.txt"]
-    "#);
+    "#,
+    );
 
     fx.run_ok(&[]);
     let out = fs::read_to_string(fx.path("out.txt")).unwrap();
-    assert!(out.trim().ends_with("/sub"), "expected command to run in sub/, got: {out}");
+    assert!(
+        out.trim().ends_with("/sub"),
+        "expected command to run in sub/, got: {out}"
+    );
 }
 
 #[test]
 fn shell_true_enables_shell_features() {
     let fx = Fixture::new();
-    fx.write("pbuild.toml", r#"
+    fx.write(
+        "pbuild.toml",
+        r#"
         [config]
         default = "run"
 
@@ -455,7 +496,8 @@ fn shell_true_enables_shell_features() {
         type    = "task"
         shell   = true
         command = ["echo hello > out.txt && echo world >> out.txt"]
-    "#);
+    "#,
+    );
 
     fx.run_ok(&[]);
     let out = fs::read_to_string(fx.path("out.txt")).unwrap();
@@ -549,9 +591,15 @@ fn log_flag_writes_output_to_file() {
     fx.run_ok(&["--log", log_str]);
 
     let log = fs::read_to_string(&log_path).unwrap();
-    assert!(log.contains("out.txt"), "expected target name in log: {log}");
+    assert!(
+        log.contains("out.txt"),
+        "expected target name in log: {log}"
+    );
     assert!(log.contains("echo built"), "expected command in log: {log}");
-    assert!(!log.contains("\x1b["), "log must not contain ANSI escape codes: {log}");
+    assert!(
+        !log.contains("\x1b["),
+        "log must not contain ANSI escape codes: {log}"
+    );
 }
 
 #[test]
