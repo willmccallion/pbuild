@@ -494,7 +494,7 @@ pub fn load_build_file() -> Result<BuildFile> {
 ///
 /// Glob patterns in `inputs` are expanded to concrete file paths at this point.
 pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
-    bf.rules
+    let rules: Vec<Rule> = bf.rules
         .iter()
         .map(|(name, raw)| {
             let target = rule_target(name, raw);
@@ -561,7 +561,26 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
                 on_failure: interpolate_vec(&bf.vars, &raw.on_failure, !raw.shell),
             })
         })
-        .collect()
+        .collect::<Result<Vec<Rule>>>()?;
+
+    // Detect duplicate output paths across rules.
+    let mut seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut conflicts: Vec<String> = Vec::new();
+    for rule in &rules {
+        if rule.output.is_empty() {
+            continue;
+        }
+        let out = rule.output.clone();
+        let name = rule.target.to_string();
+        if let Some(prev) = seen.insert(out.clone(), name.clone()) {
+            conflicts.push(format!("output `{out}` claimed by both `{prev}` and `{name}`"));
+        }
+    }
+    if !conflicts.is_empty() {
+        anyhow::bail!("output conflicts detected:\n  {}", conflicts.join("\n  "));
+    }
+
+    Ok(rules)
 }
 
 /// Resolve the default or requested target name to a `Target`.

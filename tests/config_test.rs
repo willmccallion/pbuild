@@ -224,3 +224,30 @@ fn invalid_glob_pattern_returns_err() {
         assert!(to_rules(&bf).is_err());
     });
 }
+
+#[test]
+fn duplicate_output_is_an_error() {
+    in_tempdir(|_dir| {
+        fs::write(
+            "pbuild.toml",
+            r#"
+            [a]
+            command = ["cc", "-o", "out"]
+            output  = "out"
+
+            [b]
+            command = ["cc", "-o", "out"]
+            output  = "out"
+        "#,
+        )
+        .unwrap();
+
+        let bf = load_build_file().unwrap();
+        let err = to_rules(&bf).unwrap_err();
+        assert!(
+            err.to_string().contains("output conflicts"),
+            "expected output conflict error, got: {err}"
+        );
+        assert!(err.to_string().contains("`out`"));
+    });
+}
