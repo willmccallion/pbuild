@@ -315,8 +315,29 @@ fn parse_vars(val: toml::Value) -> anyhow::Result<HashMap<String, String>> {
 
                 out.insert(key, resolved);
             }
+            toml::Value::Table(t) => {
+                if let Some(eval_val) = t.get("eval") {
+                    let cmd = eval_val.as_str().ok_or_else(|| {
+                        anyhow::anyhow!("[vars] `{key}`: eval must be a string")
+                    })?;
+                    let output = std::process::Command::new("sh")
+                        .args(["-c", cmd])
+                        .output()
+                        .with_context(|| format!("[vars] `{key}`: failed to run eval: {cmd}"))?;
+                    if !output.status.success() {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        anyhow::bail!("[vars] `{key}`: eval failed: {cmd}\n{stderr}");
+                    }
+                    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    out.insert(key, value);
+                } else {
+                    anyhow::bail!(
+                        "[vars] `{key}`: table var must have an `eval` key"
+                    );
+                }
+            }
             other => anyhow::bail!(
-                "[vars] `{key}`: expected string or array, got {}",
+                "[vars] `{key}`: expected string, array, or {{eval = ...}}, got {}",
                 other.type_str()
             ),
         }
