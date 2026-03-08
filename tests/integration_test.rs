@@ -863,3 +863,62 @@ fn explain_shows_shell_wrapping() {
     let out = fx.run_ok(&["--explain", "deploy"]);
     assert!(out.contains("sh -c"), "shell wrapping not shown: {out}");
 }
+
+#[test]
+fn status_json_output() {
+    let fx = Fixture::new();
+    fx.write(
+        "pbuild.toml",
+        r#"
+        [config]
+        default = "build"
+
+        [build]
+        type    = "task"
+        command = ["true"]
+    "#,
+    );
+    let out = fx.run_ok(&["status", "--json"]);
+    assert!(out.contains("\"target\""), "expected JSON target field: {out}");
+    assert!(out.contains("\"state\""), "expected JSON state field: {out}");
+    assert!(out.starts_with('['), "expected JSON array: {out}");
+}
+
+#[test]
+fn graph_json_output() {
+    let fx = Fixture::new();
+    fx.write(
+        "pbuild.toml",
+        r#"
+        [a]
+        type    = "task"
+        command = ["true"]
+
+        [b]
+        type    = "task"
+        command = ["true"]
+        deps    = ["a"]
+    "#,
+    );
+    let out = fx.run_ok(&["graph", "--json", "b"]);
+    assert!(out.contains("\"target\""), "expected JSON: {out}");
+    assert!(out.contains("\"deps\""), "expected deps field: {out}");
+    assert!(out.starts_with('['), "expected JSON array: {out}");
+}
+
+#[test]
+fn why_json_output() {
+    let fx = Fixture::new();
+    fx.write(
+        "pbuild.toml",
+        r#"
+        [build]
+        type    = "task"
+        command = ["true"]
+    "#,
+    );
+    let out = fx.run_ok(&["why", "--json", "build"]);
+    assert!(out.contains("\"target\""), "expected JSON target: {out}");
+    assert!(out.contains("\"reason\""), "expected JSON reason: {out}");
+    assert!(out.starts_with('{'), "expected JSON object: {out}");
+}

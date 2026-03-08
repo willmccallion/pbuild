@@ -80,8 +80,12 @@ Special targets:
   retry                Re-run the last failed target
   doctor               Check config health (commands, globs, deps, output conflicts)
   why <TARGET>         Explain why a target would rebuild
+  why --json <TARGET>  Emit why output as JSON
   graph [TARGET]       Print the dependency graph for a target
-  graph --dot [TARGET] Emit Graphviz DOT format"
+  graph --dot [TARGET] Emit Graphviz DOT format
+  graph --json [TARGET] Emit dependency graph as JSON adjacency list
+  status [TARGET]      Show which targets are dirty (would rebuild)
+  status --json [TARGET] Emit status as JSON"
     );
 }
 
@@ -362,7 +366,16 @@ fn cmd_doctor(profile: Option<&str>) -> Result<()> {
     }
 }
 
-fn cmd_why(target_name: &str, profile: Option<&str>) -> Result<()> {
+/// Escape a string for embedding inside a JSON string value.
+fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+     .replace('"', "\\\"")
+     .replace('\n', "\\n")
+     .replace('\r', "\\r")
+     .replace('\t', "\\t")
+}
+
+fn cmd_why(target_name: &str, profile: Option<&str>, json: bool) -> Result<()> {
     let mut bf = load_build_file()?;
     if let Some(p) = profile {
         apply_profile(&mut bf, p)?;
@@ -375,14 +388,59 @@ fn cmd_why(target_name: &str, profile: Option<&str>) -> Result<()> {
     let lf = hash::read_lock_file().context("could not read .pbuild.lock")?;
     let inputs = expand_inputs(&raw.inputs)?;
 
-    println!("target: {target_name}");
-
     // Merge declared inputs with depfile-discovered inputs from the lock file.
     let discovered = raw
         .depfile
         .as_deref()
         .map(|_| hash::load_depfile_inputs(&lf, &raw.output))
         .unwrap_or_default();
+
+    // Determine the primary reason this target would rebuild.
+    let reason: String = {
+        let env_dirty = bf.config.env.iter().any(|var| {
+            let current = std::env::var(var).ok();
+            current.as_deref() != hash::env_stored_value(&lf, var)
+        });
+        if env_dirty {
+            "env vars changed".to_string()
+        } else {
+            let all_inputs: Vec<&str> = inputs
+                .iter()
+                .chain(discovered.iter())
+                .map(String::as_str)
+                .collect();
+            if all_inputs.is_empty() {
+                "no inputs — always runs".to_string()
+            } else {
+                all_inputs
+                    .iter()
+                    .find(|p| hash::is_dirty(&lf, p).unwrap_or(true))
+                    .map(|p| format!("changed: {p}"))
+                    .unwrap_or_else(|| "up to date".to_string())
+            }
+        }
+    };
+
+    if json {
+        let target_esc = json_escape(target_name);
+        let reason_esc = json_escape(&reason);
+        // Build inputs array.
+        let inputs_json: Vec<String> = inputs
+            .iter()
+            .chain(discovered.iter())
+            .map(|p| {
+                let dirty = hash::is_dirty(&lf, p).unwrap_or(true);
+                let p_esc = json_escape(p);
+                let state = if dirty { "dirty" } else { "clean" };
+                format!("{{\"path\":\"{p_esc}\",\"state\":\"{state}\"}}")
+            })
+            .collect();
+        let inputs_str = inputs_json.join(",");
+        println!("{{\"target\":\"{target_esc}\",\"reason\":\"{reason_esc}\",\"inputs\":[{inputs_str}]}}");
+        return Ok(());
+    }
+
+    println!("target: {target_name}");
 
     if inputs.is_empty() && discovered.is_empty() {
         println!("  no inputs declared — always runs");
@@ -1420,7 +1478,7 @@ type        = "task"
 command     = ["echo", "replace me with your clean command"]
 "#;
 
-fn cmd_status(target: Option<&str>, profile: Option<&str>) -> Result<()> {
+fn cmd_status(target: Option<&str>, profile: Option<&str>, json: bool) -> Result<()> {
     let mut bf = load_build_file()?;
     if let Some(p) = profile {
         apply_profile(&mut bf, p)?;
@@ -1430,12 +1488,24 @@ fn cmd_status(target: Option<&str>, profile: Option<&str>) -> Result<()> {
     let plan = build_plan(&rules, &root).map_err(|e| anyhow::anyhow!("{e}"))?;
     let statuses = check_status(&plan)?;
 
-    let col = statuses.iter().map(|(n, _)| n.len()).max().unwrap_or(0) + 2;
-    for (name, dirty) in &statuses {
-        if *dirty {
-            println!("  {name:<col$} dirty");
-        } else {
-            println!("  {name:<col$} clean");
+    if json {
+        println!("[");
+        let last = statuses.len().saturating_sub(1);
+        for (i, (name, dirty)) in statuses.iter().enumerate() {
+            let comma = if i < last { "," } else { "" };
+            let name_esc = json_escape(name);
+            let state = if *dirty { "dirty" } else { "clean" };
+            println!("  {{\"target\":\"{name_esc}\",\"state\":\"{state}\"}}{comma}");
+        }
+        println!("]");
+    } else {
+        let col = statuses.iter().map(|(n, _)| n.len()).max().unwrap_or(0) + 2;
+        for (name, dirty) in &statuses {
+            if *dirty {
+                println!("  {name:<col$} dirty");
+            } else {
+                println!("  {name:<col$} clean");
+            }
         }
     }
     Ok(())
@@ -2208,21 +2278,23 @@ fn run() -> Result<()> {
     let early_profile = extract_profile(&raw_argv);
 
     if raw_argv.first().map(String::as_str) == Some("why") {
+        let json = raw_argv.iter().any(|a| a == "--json");
         let target = raw_argv
             .iter()
             .skip(1)
             .find(|a| !a.starts_with('-') && *a != early_profile.unwrap_or(""))
             .map(String::as_str)
             .ok_or_else(|| anyhow::anyhow!("usage: pbuild why <target>"))?;
-        return cmd_why(target, early_profile);
+        return cmd_why(target, early_profile, json);
     }
     if raw_argv.first().map(String::as_str) == Some("status") {
+        let json = raw_argv.iter().any(|a| a == "--json");
         let target = raw_argv
             .iter()
             .skip(1)
             .find(|a| !a.starts_with('-') && *a != early_profile.unwrap_or(""))
             .map(String::as_str);
-        return cmd_status(target, early_profile);
+        return cmd_status(target, early_profile, json);
     }
     if raw_argv.first().map(String::as_str) == Some("add") {
         let name = raw_argv
@@ -2263,16 +2335,32 @@ fn run() -> Result<()> {
         return cmd_touch(target);
     }
     if raw_argv.first().map(String::as_str) == Some("graph") {
-        let dot = raw_argv.iter().any(|a| a == "--dot");
+        let dot  = raw_argv.iter().any(|a| a == "--dot");
+        let json = raw_argv.iter().any(|a| a == "--json");
         let target = raw_argv
             .iter()
             .skip(1)
-            .find(|a| *a != "--dot")
+            .find(|a| *a != "--dot" && *a != "--json")
             .map(String::as_str);
         let bf = load_build_file()?;
         let rules = to_rules(&bf)?;
         let root = resolve_target(&bf, target)?;
-        if dot {
+        if json {
+            let plan = build_plan(&rules, &root).map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("[");
+            let last = plan.len().saturating_sub(1);
+            for (i, rule) in plan.iter().enumerate() {
+                let comma = if i < last { "," } else { "" };
+                let name_esc = json_escape(&rule.target.to_string());
+                let deps_json: Vec<String> = rule
+                    .deps
+                    .iter()
+                    .map(|d| format!("\"{}\"", json_escape(&d.to_string())))
+                    .collect();
+                println!("  {{\"target\":\"{name_esc}\",\"deps\":[{}]}}{comma}", deps_json.join(","));
+            }
+            println!("]");
+        } else if dot {
             print_dot(&rules, &root);
         } else {
             print_graph(&rules, &root);
