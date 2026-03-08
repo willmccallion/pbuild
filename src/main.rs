@@ -574,6 +574,47 @@ fn suggest_command(name: &str) -> &'static str {
     }
 }
 
+/// Suggest "task" for well-known phony names, "file" for everything else.
+fn suggest_type(name: &str) -> &'static str {
+    match name {
+        "build" | "test" | "tests" | "lint" | "check" | "fmt" | "format"
+        | "clean" | "run" | "serve" | "start" | "release" | "install"
+        | "ci" | "all" | "dev" | "deploy" | "publish" | "bench" | "doc" | "docs" => "task",
+        _ => "file",
+    }
+}
+
+/// Suggest a default output path based on rule name and project type.
+fn suggest_output(name: &str) -> &'static str {
+    let has_cargo = std::path::Path::new("Cargo.toml").exists();
+    match name {
+        "build" | "release" if has_cargo => "target/release/app",
+        _ => "",
+    }
+}
+
+/// Suggest default input globs based on rule name and project type.
+fn suggest_inputs(name: &str) -> &'static str {
+    let has_cargo = std::path::Path::new("Cargo.toml").exists();
+    let has_npm = std::path::Path::new("package.json").exists();
+    let has_python = std::path::Path::new("pyproject.toml").exists()
+        || std::path::Path::new("setup.py").exists();
+    match name {
+        "build" | "release" => {
+            if has_cargo { "src/**/*.rs" }
+            else if has_npm { "src/**/*.{ts,tsx,js,jsx}" }
+            else if has_python { "src/**/*.py" }
+            else { "" }
+        }
+        "test" | "tests" => {
+            if has_cargo { "src/**/*.rs tests/**/*.rs" }
+            else if has_python { "tests/**/*.py src/**/*.py" }
+            else { "" }
+        }
+        _ => "",
+    }
+}
+
 fn cmd_add(name: &str) -> Result<()> {
     if !std::path::Path::new("pbuild.toml").exists() {
         anyhow::bail!("no pbuild.toml found — run `pbuild init` first");
@@ -590,15 +631,30 @@ fn cmd_add(name: &str) -> Result<()> {
     println!("Adding rule `{name}` to pbuild.toml");
     println!("Press Enter to accept defaults.\n");
 
-    let rule_type = prompt("type (task/file)", "task")?;
+    let default_cmd = suggest_command(name);
+    // Suggest "task" for well-known phony names, "file" otherwise.
+    let default_type = suggest_type(name);
+    let rule_type = prompt("type (task/file)", default_type)?;
     let description = prompt("description", "")?;
     let group = prompt("group", "")?;
-    let default_cmd = suggest_command(name);
     let command_str = prompt("command", default_cmd)?;
 
     if command_str.is_empty() {
         anyhow::bail!("command is required");
     }
+
+    // For file rules, also ask for inputs/output/deps.
+    let (inputs_str, output_str, deps_str) = if rule_type == "file" {
+        let suggested_output = suggest_output(name);
+        let suggested_inputs = suggest_inputs(name);
+        let i = prompt("inputs (space-separated globs, or blank)", suggested_inputs)?;
+        let o = prompt("output", suggested_output)?;
+        let d = prompt("deps (space-separated rule names, or blank)", "")?;
+        (i, o, d)
+    } else {
+        let d = prompt("deps (space-separated rule names, or blank)", "")?;
+        (String::new(), String::new(), d)
+    };
 
     // Split the command string into an argv array for TOML.
     let argv: Vec<String> = command_str
@@ -629,6 +685,25 @@ fn cmd_add(name: &str) -> Result<()> {
         snippet.push_str("type        = \"task\"\n");
     }
     let _ = writeln!(snippet, "command     = [{argv_toml}]");
+    if !deps_str.is_empty() {
+        let deps_toml = deps_str
+            .split_whitespace()
+            .map(|d| format!("\"{d}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(snippet, "deps        = [{deps_toml}]");
+    }
+    if !inputs_str.is_empty() {
+        let inputs_toml = inputs_str
+            .split_whitespace()
+            .map(|i| format!("\"{i}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(snippet, "inputs      = [{inputs_toml}]");
+    }
+    if !output_str.is_empty() {
+        let _ = writeln!(snippet, "output      = \"{output_str}\"");
+    }
 
     let mut content = existing;
     // Ensure a trailing newline before appending.
@@ -653,6 +728,31 @@ fn cmd_init(detect: bool) -> Result<()> {
     };
     fs::write("pbuild.toml", &content).context("failed to write pbuild.toml")?;
     println!("wrote pbuild.toml");
+
+    // Add .pbuild.lock to .gitignore if we're in a git repo and it isn't already listed.
+    let gitignore_path = std::path::Path::new(".gitignore");
+    let entry = ".pbuild.lock\n";
+    let already_listed = gitignore_path
+        .exists()
+        .then(|| fs::read_to_string(gitignore_path).unwrap_or_default())
+        .map(|s| s.lines().any(|l| l.trim() == ".pbuild.lock"))
+        .unwrap_or(false);
+    if !already_listed && std::path::Path::new(".git").exists() {
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(gitignore_path)
+            .context("failed to open .gitignore")?;
+        use std::io::Write as _;
+        // Ensure we start on a new line.
+        let existing = fs::read_to_string(gitignore_path).unwrap_or_default();
+        if !existing.is_empty() && !existing.ends_with('\n') {
+            writeln!(file)?;
+        }
+        write!(file, "{entry}")?;
+        println!("added .pbuild.lock to .gitignore");
+    }
+
     Ok(())
 }
 
