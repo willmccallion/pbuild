@@ -94,6 +94,22 @@ pub fn env_stored_value<'a>(lf: &'a LockFile, var: &str) -> Option<&'a str> {
     lf.get(&env_key(var)).map(String::as_str)
 }
 
+/// Read/write the last-built and last-failed target names from the lock file.
+pub fn get_meta(lf: &LockFile, key: &str) -> Option<String> {
+    lf.get(key).cloned()
+}
+
+pub fn set_meta(lf: &mut LockFile, key: &str, value: &str) {
+    lf.insert(key.to_string(), value.to_string());
+}
+
+pub fn clear_meta(lf: &mut LockFile, key: &str) {
+    lf.remove(key);
+}
+
+pub const META_LAST: &str = "meta:last";
+pub const META_LAST_FAILED: &str = "meta:last-failed";
+
 /// Remove all lock file entries associated with a rule output (hashes + depfile inputs).
 pub fn remove_rule_entries(lf: &mut LockFile, inputs: &[String], output: &str) {
     for path in inputs {

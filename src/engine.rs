@@ -7,7 +7,7 @@ use rayon::ThreadPoolBuilder;
 use rayon::prelude::*;
 
 use crate::depfile;
-use crate::hash::{self, LockFile};
+use crate::hash::{self, LockFile, META_LAST_FAILED};
 use crate::process::{run_command, run_command_streaming, run_command_tty};
 use crate::types::{Rule, Target};
 use crate::ui::UiConfig;
@@ -133,12 +133,18 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
                     }
                     eprintln!("pbuild: {e}");
                     // Record the failed target for `pbuild retry`.
-                    let _ = std::fs::write(".pbuild.last-failed", rule.target.to_string());
+                    {
+                        let mut lf = lock_file.write().unwrap();
+                        hash::set_meta(&mut lf, META_LAST_FAILED, &rule.target.to_string());
+                    }
                     failures.push(e);
                 }
                 Err(e) => {
                     // Record the failed target for `pbuild retry`.
-                    let _ = std::fs::write(".pbuild.last-failed", rules.last().map(|r| r.target.to_string()).unwrap_or_default());
+                    let failed = rule.target.to_string();
+                    let mut lf = lock_file.write().unwrap();
+                    hash::set_meta(&mut lf, META_LAST_FAILED, &failed);
+                    let _ = hash::write_lock_file(&lf);
                     return Err(e);
                 }
             }

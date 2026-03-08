@@ -73,7 +73,6 @@ Special targets:
   clean <TARGET>       Delete one target's output and its lock entries
   touch <TARGET>       Hash inputs/output now — mark target clean without building
   prune                Remove stale entries from .pbuild.lock
-  last                 Print output from the previous build run
   retry                Re-run the last failed target
   why <TARGET>         Explain why a target would rebuild
   graph [TARGET]       Print the dependency graph for a target
@@ -314,6 +313,7 @@ complete -c pbuild -n '__fish_is_first_arg' -a 'import' -d 'Convert a Makefile t
 complete -c pbuild -n '__fish_is_first_arg' -a 'add'    -d 'Add a new rule'
 complete -c pbuild -n '__fish_is_first_arg' -a 'edit'   -d 'Open pbuild.toml at target in $EDITOR'
 complete -c pbuild -n '__fish_is_first_arg' -a 'run'    -d 'Build a target (explicit subcommand)'
+complete -c pbuild -n '__fish_is_first_arg' -a 'retry'  -d 'Retry last failed target'
 complete -c pbuild -n '__fish_is_first_arg' -a 'status' -d 'Show dirty/clean state'
 complete -c pbuild -n '__fish_is_first_arg' -a 'clean'  -d 'Delete outputs and lock file'
 complete -c pbuild -n '__fish_is_first_arg' -a 'touch'  -d 'Mark target clean without building'
@@ -352,7 +352,7 @@ _pbuild_complete() {
     if [[ -f pbuild.toml ]]; then
         targets=$(pbuild --list 2>/dev/null | grep -oP '^\s+\K\S+')
     fi
-    COMPREPLY=($(compgen -W "init import add edit run last retry status clean touch prune why graph $targets" -- "$cur"))
+    COMPREPLY=($(compgen -W "init import add edit run retry status clean touch prune why graph $targets" -- "$cur"))
 }
 
 complete -F _pbuild_complete pbuild
@@ -383,7 +383,7 @@ _pbuild() {
         '--log[Tee output to a file]:file:_files' \
         '(-p --profile)'{-p,--profile}'[Activate a named profile]:profile' \
         '--completion[Print completion script]:shell:(fish bash zsh)' \
-        ':target:(init import add edit run last retry status clean touch prune why graph '"${targets[@]}"')'
+        ':target:(init import add edit run retry status clean touch prune why graph '"${targets[@]}"')'
 }
 
 _pbuild
@@ -1126,33 +1126,16 @@ fn cmd_status(target: Option<&str>, profile: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn cmd_last() -> Result<()> {
-    match fs::read_to_string(".pbuild.last") {
-        Ok(contents) => {
-            print!("{contents}");
-            Ok(())
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            eprintln!("pbuild: no previous build output (.pbuild.last not found)");
-            Ok(())
-        }
-        Err(e) => Err(e).context("failed to read .pbuild.last"),
-    }
-}
 
 fn cmd_retry() -> Result<()> {
-    let target = match fs::read_to_string(".pbuild.last-failed") {
-        Ok(t) => t.trim().to_string(),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            eprintln!("pbuild: no previous failed target (.pbuild.last-failed not found)");
+    let lf = pbuild::hash::read_lock_file().context("failed to read lock file")?;
+    let target = match pbuild::hash::get_meta(&lf, pbuild::hash::META_LAST_FAILED) {
+        Some(t) if !t.is_empty() => t,
+        _ => {
+            eprintln!("pbuild: no previous failed target");
             return Ok(());
         }
-        Err(e) => return Err(e).context("failed to read .pbuild.last-failed"),
     };
-    if target.is_empty() {
-        eprintln!("pbuild: .pbuild.last-failed is empty");
-        return Ok(());
-    }
     println!("pbuild: retrying {target}");
     // Re-exec ourselves with the failed target.
     let exe = std::env::current_exe().context("could not find pbuild executable")?;
@@ -1951,9 +1934,7 @@ fn run() -> Result<()> {
     if raw_argv.first().map(String::as_str) == Some("prune") {
         return cmd_prune();
     }
-    if raw_argv.first().map(String::as_str) == Some("last") {
-        return cmd_last();
-    }
+
     if raw_argv.first().map(String::as_str) == Some("retry") {
         return cmd_retry();
     }
@@ -2028,15 +2009,7 @@ fn run() -> Result<()> {
         return cmd_watch(&args);
     }
 
-    // Always write output to .pbuild.last (overwrite, no ANSI codes).
-    let last_file = fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(".pbuild.last")
-        .ok();
-
-    let log_file = args
+    let log = args
         .log
         .as_deref()
         .map(|path| {
@@ -2046,13 +2019,8 @@ fn run() -> Result<()> {
                 .open(path)
                 .with_context(|| format!("failed to open log file: {path}"))
         })
-        .transpose()?;
-
-    // Combine explicit --log and implicit .pbuild.last into the UI log slot.
-    // If both are set, prefer --log (user-specified); .pbuild.last still gets
-    // written via the log field since we can only store one file there.
-    // For simplicity, --log wins; .pbuild.last is used when --log is absent.
-    let log = log_file.or(last_file).map(|f| Arc::new(Mutex::new(f)));
+        .transpose()?
+        .map(|f| Arc::new(Mutex::new(f)));
 
     let ui = pbuild::ui::UiConfig {
         log,
@@ -2114,8 +2082,13 @@ fn run() -> Result<()> {
         execute_plan(&cfg, &plan)?;
     }
 
-    // On success, clear last-failed marker.
-    let _ = fs::remove_file(".pbuild.last-failed");
+    // On success, clear last-failed marker from lock file.
+    if let Ok(mut lf) = pbuild::hash::read_lock_file() {
+        if lf.contains_key(pbuild::hash::META_LAST_FAILED) {
+            pbuild::hash::clear_meta(&mut lf, pbuild::hash::META_LAST_FAILED);
+            let _ = pbuild::hash::write_lock_file(&lf);
+        }
+    }
 
     Ok(())
 }
