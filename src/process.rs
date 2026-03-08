@@ -1,3 +1,4 @@
+use std::io::{Read, Write};
 use std::process::{Command, Output, Stdio};
 
 use anyhow::{Result, bail};
@@ -45,4 +46,79 @@ pub fn run_command(argv: &[String], dir: Option<&str>) -> Result<Vec<u8>> {
     }
 
     Ok(combined)
+}
+
+/// Run a command, streaming stdout+stderr directly to the terminal in real time.
+/// Returns an error if the command exits non-zero; the output has already been
+/// printed so the caller does not need to display it again.
+pub fn run_command_streaming(argv: &[String], dir: Option<&str>) -> Result<()> {
+    let (program, rest) = match argv {
+        [] => return Ok(()),
+        [program, rest @ ..] => (program, rest),
+    };
+
+    let mut cmd = Command::new(program);
+    cmd.args(rest)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    if let Some(d) = dir {
+        cmd.current_dir(d);
+    }
+
+    let mut child = cmd.spawn()?;
+
+    // Drain both pipes concurrently using two threads so neither blocks.
+    // We write directly to the locked stdout/stderr handles to avoid
+    // per-byte locking overhead.
+    let child_stdout = child.stdout.take().expect("stdout piped");
+    let child_stderr = child.stderr.take().expect("stderr piped");
+
+    let stdout_thread = std::thread::spawn(move || {
+        let mut reader = child_stdout;
+        let stdout = std::io::stdout();
+        let mut out = stdout.lock();
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let _ = out.write_all(&buf[..n]);
+                    let _ = out.flush();
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let stderr_thread = std::thread::spawn(move || {
+        let mut reader = child_stderr;
+        let stderr = std::io::stderr();
+        let mut err = stderr.lock();
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let _ = err.write_all(&buf[..n]);
+                    let _ = err.flush();
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let status = child.wait()?;
+    let _ = stdout_thread.join();
+    let _ = stderr_thread.join();
+
+    if !status.success() {
+        let code = status
+            .code()
+            .map_or("signal".to_string(), |c| c.to_string());
+        bail!("exited {code}: {}", argv.join(" "));
+    }
+
+    Ok(())
 }

@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use pbuild::{
     config::{BuildFile, expand_inputs, load_build_file, resolve_target, to_rules},
     engine::{Config, check_status, execute_plan},
-    graph::build_plan,
+    graph::{build_plan, print_graph},
     hash,
 };
 
@@ -62,15 +62,22 @@ Special targets:
   import [Makefile]    Convert a Makefile into pbuild.toml (default: Makefile)
   add <name>           Interactively scaffold a new rule in pbuild.toml
   edit [TARGET]        Open pbuild.toml in $EDITOR at the given target's rule
+  run <TARGET>         Alias for pbuild <TARGET> (explicit subcommand form)
   status [TARGET]      Show which targets are dirty (would rebuild)
   clean                Delete all rule outputs and .pbuild.lock
-  why <TARGET>         Explain why a target would rebuild"
+  why <TARGET>         Explain why a target would rebuild
+  graph [TARGET]       Print the dependency graph for a target"
     );
 }
 
 fn parse_args() -> Result<Args> {
     let mut raw = std::env::args().skip(1).peekable();
     let mut args = Args::default();
+
+    // `pbuild run <target> [-- extra]` is an alias for `pbuild <target> [-- extra]`.
+    if raw.peek().map(String::as_str) == Some("run") {
+        raw.next(); // consume "run"
+    }
 
     while let Some(arg) = raw.next() {
         match arg.as_str() {
@@ -274,9 +281,11 @@ complete -c pbuild -n '__fish_is_first_arg' -a 'init'   -d 'Write starter pbuild
 complete -c pbuild -n '__fish_is_first_arg' -a 'import' -d 'Convert a Makefile to pbuild.toml'
 complete -c pbuild -n '__fish_is_first_arg' -a 'add'    -d 'Add a new rule'
 complete -c pbuild -n '__fish_is_first_arg' -a 'edit'   -d 'Open pbuild.toml at target in $EDITOR'
+complete -c pbuild -n '__fish_is_first_arg' -a 'run'    -d 'Build a target (explicit subcommand)'
 complete -c pbuild -n '__fish_is_first_arg' -a 'status' -d 'Show dirty/clean state'
 complete -c pbuild -n '__fish_is_first_arg' -a 'clean'  -d 'Delete outputs and lock file'
 complete -c pbuild -n '__fish_is_first_arg' -a 'why'    -d 'Explain why a target rebuilds'
+complete -c pbuild -n '__fish_is_first_arg' -a 'graph'  -d 'Print dependency graph'
 
 # Targets from pbuild.toml
 complete -c pbuild -n '__fish_is_first_arg' -a '(__pbuild_targets)'
@@ -308,7 +317,7 @@ _pbuild_complete() {
     if [[ -f pbuild.toml ]]; then
         targets=$(pbuild --list 2>/dev/null | grep -oP '^\s+\K\S+')
     fi
-    COMPREPLY=($(compgen -W "init import add edit status clean why $targets" -- "$cur"))
+    COMPREPLY=($(compgen -W "init import add edit run status clean why graph $targets" -- "$cur"))
 }
 
 complete -F _pbuild_complete pbuild
@@ -337,7 +346,7 @@ _pbuild() {
         '--detect[Auto-detect project type (use with init)]' \
         '--log[Tee output to a file]:file:_files' \
         '--completion[Print completion script]:shell:(fish bash zsh)' \
-        ':target:(init import add edit status clean why '"${targets[@]}"')'
+        ':target:(init import add edit run status clean why graph '"${targets[@]}"')'
 }
 
 _pbuild
@@ -1604,6 +1613,14 @@ fn run() -> Result<()> {
     if raw_argv.first().map(String::as_str) == Some("edit") {
         let target = raw_argv.get(1).map(String::as_str);
         return cmd_edit(target);
+    }
+    if raw_argv.first().map(String::as_str) == Some("graph") {
+        let target = raw_argv.get(1).map(String::as_str);
+        let bf = load_build_file()?;
+        let rules = to_rules(&bf)?;
+        let root = resolve_target(&bf, target)?;
+        print_graph(&rules, &root);
+        return Ok(());
     }
     // --completion doesn't need a pbuild.toml — detect it early.
     if let Some(pos) = raw_argv.iter().position(|a| a == "--completion") {

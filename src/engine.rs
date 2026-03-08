@@ -8,7 +8,7 @@ use rayon::prelude::*;
 
 use crate::depfile;
 use crate::hash::{self, LockFile};
-use crate::process::run_command;
+use crate::process::{run_command, run_command_streaming};
 use crate::types::{Rule, Target};
 use crate::ui::UiConfig;
 
@@ -103,11 +103,14 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
         }
 
         // Run the wave in parallel (bounded by the thread pool).
+        // When only one rule is ready, stream its output live; when multiple
+        // rules run simultaneously, buffer each atomically to prevent interleaving.
         let ui = &cfg.ui;
+        let streaming = ready.len() == 1;
         let results: Vec<Result<Option<std::time::Duration>>> = pool.install(|| {
             ready
                 .par_iter()
-                .map(|rule| run_rule(cfg, env_dirty, ui, &lock_file, &rebuilt, rule))
+                .map(|rule| run_rule(cfg, env_dirty, streaming, ui, &lock_file, &rebuilt, rule))
                 .collect()
         });
 
@@ -164,6 +167,7 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
 fn run_rule(
     cfg: &Config,
     env_dirty: bool,
+    streaming: bool,
     ui: &UiConfig,
     lock_file: &RwLock<LockFile>,
     rebuilt: &Mutex<HashSet<Target>>,
@@ -191,6 +195,31 @@ fn run_rule(
             ui.print_skip(&rule.target);
         }
         return Ok(None);
+    }
+
+    // In verbose mode, explain why this rule is dirty before running it.
+    if cfg.verbose {
+        if env_dirty {
+            ui.print_dirty_reason(&rule.target, "env vars changed");
+        } else if dep_rebuilt {
+            let dep = rule
+                .deps
+                .iter()
+                .find(|d| rebuilt.lock().unwrap().contains(*d))
+                .map(|d| d.to_string())
+                .unwrap_or_default();
+            ui.print_dirty_reason(&rule.target, &format!("dep rebuilt: {dep}"));
+        } else {
+            // file_dirty: find and report the first changed input.
+            let lf = lock_file.read().unwrap();
+            let reason = all_inputs
+                .iter()
+                .find(|p| hash::is_dirty(&lf, p).unwrap_or(true))
+                .map(|p| format!("changed: {p}"))
+                .unwrap_or_else(|| "no inputs — always runs".to_string());
+            drop(lf);
+            ui.print_dirty_reason(&rule.target, &reason);
+        }
     }
 
     // Build the final command list, injecting -MF and extra_args into the
@@ -275,26 +304,37 @@ fn run_rule(
                 cmd.clone()
             };
         ui.print_command(&effective);
-        match run_command(&effective, effective_dir) {
-            Ok(output) => captured.extend_from_slice(&output),
-            Err(e) => {
-                // Extract any output embedded in the error message and print it
-                // before surfacing the failure, so the user sees compiler errors.
-                let msg = e.to_string();
-                // run_command embeds output after the first newline.
-                if let Some(pos) = msg.find('\n') {
-                    let output_part = &msg[pos + 1..];
-                    if !output_part.is_empty() {
-                        captured.extend_from_slice(output_part.as_bytes());
-                    }
-                }
+        if streaming && !cfg.dry_run {
+            // Single-rule wave: stream output directly to the terminal so the
+            // user sees progress in real time instead of waiting for completion.
+            if let Err(e) = run_command_streaming(&effective, effective_dir) {
                 run_err = Some(e);
                 break;
             }
+        } else {
+            match run_command(&effective, effective_dir) {
+                Ok(output) => captured.extend_from_slice(&output),
+                Err(e) => {
+                    // Extract any output embedded in the error message and print it
+                    // before surfacing the failure, so the user sees compiler errors.
+                    let msg = e.to_string();
+                    // run_command embeds output after the first newline.
+                    if let Some(pos) = msg.find('\n') {
+                        let output_part = &msg[pos + 1..];
+                        if !output_part.is_empty() {
+                            captured.extend_from_slice(output_part.as_bytes());
+                        }
+                    }
+                    run_err = Some(e);
+                    break;
+                }
+            }
         }
     }
-    // Always print whatever output we captured (including partial output on failure).
-    ui.print_output(&captured);
+    // Print buffered output (only non-empty when not streaming).
+    if !captured.is_empty() {
+        ui.print_output(&captured);
+    }
     if let Some(e) = run_err {
         ui.print_fail(&rule.target);
         return Err(e);

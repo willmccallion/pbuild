@@ -2,6 +2,51 @@ use std::collections::{HashMap, HashSet};
 
 use crate::types::{Rule, Target};
 
+/// Print an ASCII representation of the dependency graph rooted at `root`.
+///
+/// Example output:
+/// ```text
+/// build
+/// ├── rust
+/// └── python
+/// ```
+pub fn print_graph(rules: &[Rule], root: &Target) {
+    let index: HashMap<&Target, &Rule> = rules.iter().map(|r| (&r.target, r)).collect();
+    // Print the root with no connector, then recurse into its deps.
+    println!("{root}");
+    if let Some(rule) = index.get(root) {
+        let deps = &rule.deps;
+        for (i, dep) in deps.iter().enumerate() {
+            let last = i == deps.len() - 1;
+            print_node(dep, &index, "", last);
+        }
+    }
+}
+
+fn print_node(
+    target: &Target,
+    index: &HashMap<&Target, &Rule>,
+    prefix: &str,
+    is_last: bool,
+) {
+    let connector = if is_last { "└── " } else { "├── " };
+    println!("{prefix}{connector}{target}");
+
+    let child_prefix = if is_last {
+        format!("{prefix}    ")
+    } else {
+        format!("{prefix}│   ")
+    };
+
+    if let Some(rule) = index.get(target) {
+        let deps = &rule.deps;
+        for (i, dep) in deps.iter().enumerate() {
+            let last = i == deps.len() - 1;
+            print_node(dep, index, &child_prefix, last);
+        }
+    }
+}
+
 /// Given all known rules and a root target, return a topologically sorted
 /// list of rules to execute (leaves first, root last), or an error string.
 ///

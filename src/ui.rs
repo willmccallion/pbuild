@@ -84,6 +84,12 @@ impl UiConfig {
         self.log(&format!("– {target}"));
     }
 
+    /// `  → build  changed: src/main.rs`  (verbose, before a rule runs)
+    pub fn print_dirty_reason(&self, target: &impl std::fmt::Display, reason: &str) {
+        println!("  {} {target}  {}", self.yellow("→"), self.dim(reason));
+        self.log(&format!("  → {target}  {reason}"));
+    }
+
     /// `    (dry) cargo build --release`
     pub fn print_dry_run(&self, cmd: &[String]) {
         println!("    {} {}", self.yellow("dry"), self.dim(&cmd.join(" ")));
