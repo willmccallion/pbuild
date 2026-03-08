@@ -69,6 +69,7 @@ trust   = true               # allow commands that touch system paths (sudo, etc
 [vars]
 cargo  = "cargo"             # reusable values, interpolated with {{name}}
 python = [".venv/bin/python3", "python3"]  # fallback array: first one found on PATH wins
+solver = { eval = "cargo build-bin app" }  # eval: run a command at load time, use its stdout
 
 [ui]
 color  = true                # force color on/off (default: auto-detect TTY)
@@ -132,6 +133,14 @@ If a var is not found in `[vars]`, pbuild falls back to the environment.
 [vars]
 python  = [".venv/bin/python3", ".venv/bin/python", "python3"]
 maturin = [".venv/bin/maturin", "maturin"]
+```
+
+**Eval vars** resolve a shell command at load time and use the output as the value. Useful for discovering binary paths or dynamic values:
+
+```toml
+[vars]
+solver = { eval = "cabal list-bin cdcl-sat" }
+commit = { eval = "git rev-parse --short HEAD" }
 ```
 
 ### `[ui]`
