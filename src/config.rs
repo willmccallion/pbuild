@@ -270,17 +270,23 @@ pub fn parse_duration(s: &str) -> anyhow::Result<std::time::Duration> {
         match ch {
             '0'..='9' => num_buf.push(ch),
             'h' => {
-                let n: u64 = num_buf.parse().map_err(|_| anyhow::anyhow!("invalid duration: {s}"))?;
+                let n: u64 = num_buf
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("invalid duration: {s}"))?;
                 total_secs += n * 3600;
                 num_buf.clear();
             }
             'm' => {
-                let n: u64 = num_buf.parse().map_err(|_| anyhow::anyhow!("invalid duration: {s}"))?;
+                let n: u64 = num_buf
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("invalid duration: {s}"))?;
                 total_secs += n * 60;
                 num_buf.clear();
             }
             's' => {
-                let n: u64 = num_buf.parse().map_err(|_| anyhow::anyhow!("invalid duration: {s}"))?;
+                let n: u64 = num_buf
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("invalid duration: {s}"))?;
                 total_secs += n;
                 num_buf.clear();
             }
@@ -298,7 +304,9 @@ fn parse_output_mode(s: &str, rule_name: &str) -> Result<OutputMode> {
         "" | "display" => Ok(OutputMode::Display),
         "mute" => Ok(OutputMode::Mute),
         "percent" => Ok(OutputMode::Percent),
-        other => bail!("rule `{rule_name}`: unknown progress mode `{other}` (expected display, mute, or percent)"),
+        other => bail!(
+            "rule `{rule_name}`: unknown progress mode `{other}` (expected display, mute, or percent)"
+        ),
     }
 }
 
@@ -377,9 +385,9 @@ fn parse_vars(val: toml::Value) -> anyhow::Result<HashMap<String, String>> {
             }
             toml::Value::Table(t) => {
                 if let Some(eval_val) = t.get("eval") {
-                    let cmd = eval_val.as_str().ok_or_else(|| {
-                        anyhow::anyhow!("[vars] `{key}`: eval must be a string")
-                    })?;
+                    let cmd = eval_val
+                        .as_str()
+                        .ok_or_else(|| anyhow::anyhow!("[vars] `{key}`: eval must be a string"))?;
                     let output = std::process::Command::new("sh")
                         .args(["-c", cmd])
                         .output()
@@ -391,9 +399,7 @@ fn parse_vars(val: toml::Value) -> anyhow::Result<HashMap<String, String>> {
                     let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
                     out.insert(key, value);
                 } else {
-                    anyhow::bail!(
-                        "[vars] `{key}`: table var must have an `eval` key"
-                    );
+                    anyhow::bail!("[vars] `{key}`: table var must have an `eval` key");
                 }
             }
             other => anyhow::bail!(
@@ -494,7 +500,8 @@ pub fn load_build_file() -> Result<BuildFile> {
 ///
 /// Glob patterns in `inputs` are expanded to concrete file paths at this point.
 pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
-    let rules: Vec<Rule> = bf.rules
+    let rules: Vec<Rule> = bf
+        .rules
         .iter()
         .map(|(name, raw)| {
             let target = rule_target(name, raw);
@@ -537,19 +544,28 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
                     .map(|s| interpolate(&bf.vars, s, true)),
                 description: raw.description.clone(),
                 group: raw.group.clone(),
-                env: raw.env.iter().map(|(k, v)| {
-                    (k.clone(), interpolate(&bf.vars, v, true))
-                }).collect(),
+                env: raw
+                    .env
+                    .iter()
+                    .map(|(k, v)| (k.clone(), interpolate(&bf.vars, v, true)))
+                    .collect(),
                 tty: raw.tty,
                 cache: raw.cache,
-                for_each: raw.for_each.as_deref().map(|s| interpolate(&bf.vars, s, true)),
+                for_each: raw
+                    .for_each
+                    .as_deref()
+                    .map(|s| interpolate(&bf.vars, s, true)),
                 progress: parse_output_mode(&raw.progress, name)?,
-                downloads: raw.downloads.iter().map(|d| Download {
-                    url: interpolate(&bf.vars, &d.url, true),
-                    dest: interpolate(&bf.vars, &d.dest, true),
-                    extract: d.extract.clone(),
-                    strip: d.strip,
-                }).collect(),
+                downloads: raw
+                    .downloads
+                    .iter()
+                    .map(|d| Download {
+                        url: interpolate(&bf.vars, &d.url, true),
+                        dest: interpolate(&bf.vars, &d.dest, true),
+                        extract: d.extract.clone(),
+                        strip: d.strip,
+                    })
+                    .collect(),
                 max_time: {
                     // Rule-level max_time takes precedence over config-level default.
                     let s = raw.max_time.as_deref().or(bf.config.max_time.as_deref());
@@ -573,7 +589,9 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
         let out = rule.output.clone();
         let name = rule.target.to_string();
         if let Some(prev) = seen.insert(out.clone(), name.clone()) {
-            conflicts.push(format!("output `{out}` claimed by both `{prev}` and `{name}`"));
+            conflicts.push(format!(
+                "output `{out}` claimed by both `{prev}` and `{name}`"
+            ));
         }
     }
     if !conflicts.is_empty() {

@@ -89,7 +89,10 @@ impl UiConfig {
 
     /// `Nothing to do — all targets are up to date.`
     pub fn print_up_to_date(&self) {
-        println!("{}", self.dim("Nothing to do — all targets are up to date."));
+        println!(
+            "{}",
+            self.dim("Nothing to do — all targets are up to date.")
+        );
     }
 
     /// `  → build  changed: src/main.rs`  (verbose, before a rule runs)
@@ -139,7 +142,10 @@ impl UiConfig {
             return;
         }
         let pct = current * 100 / total;
-        let msg = format!("    {} {target}", self.dim(&format!("[{current}/{total}] {pct}%")));
+        let msg = format!(
+            "    {} {target}",
+            self.dim(&format!("[{current}/{total}] {pct}%"))
+        );
         print!("\r{msg}");
         let _ = std::io::stdout().flush();
     }
@@ -155,7 +161,13 @@ impl UiConfig {
 
     /// `    ↓ https://example.com/foo.tar.gz → bench/foo`
     pub fn print_download(&self, url: &str, dest: &str) {
-        println!("    {} {} {} {}", self.dim("↓"), self.dim(url), self.dim("→"), dest);
+        println!(
+            "    {} {} {} {}",
+            self.dim("↓"),
+            self.dim(url),
+            self.dim("→"),
+            dest
+        );
         self.log(&format!("    ↓ {url} → {dest}"));
     }
 

@@ -1,5 +1,6 @@
 [config]
-default = "build"
+default     = "build"
+keep_going  = true
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -7,12 +8,14 @@ default = "build"
 group       = "Build"
 description = "Build debug binary"
 type        = "task"
+max_time    = "5m"
 command     = ["cargo", "build"]
 
 [release]
 group       = "Build"
 description = "Build release binary"
 type        = "task"
+max_time    = "10m"
 command     = ["cargo", "build", "--release"]
 
 [install]
@@ -28,12 +31,15 @@ command     = ["cargo", "install", "--path", "."]
 group       = "Development"
 description = "Run all tests"
 type        = "task"
+max_time    = "5m"
+retry       = 1
 command     = ["cargo", "test"]
 
 [clippy]
 group       = "Development"
 description = "Run clippy linter"
 type        = "task"
+max_time    = "5m"
 command     = ["cargo", "clippy", "--all-targets", "--", "-D", "warnings"]
 
 [fmt]
@@ -59,6 +65,7 @@ command     = ["true"]
 group       = "Development"
 description = "Fast type check"
 type        = "task"
+max_time    = "3m"
 command     = ["cargo", "check", "--all-targets"]
 
 # ── Housekeeping ──────────────────────────────────────────────────────────────

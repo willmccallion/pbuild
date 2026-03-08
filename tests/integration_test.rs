@@ -778,7 +778,10 @@ fn doctor_passes_on_valid_config() {
     "#,
     );
     let out = fx.run_ok(&["doctor"]);
-    assert!(out.contains("All checks passed") || out.contains("✓"), "got: {out}");
+    assert!(
+        out.contains("All checks passed") || out.contains("✓"),
+        "got: {out}"
+    );
 }
 
 #[test]
@@ -815,7 +818,10 @@ fn doctor_fails_on_duplicate_output() {
     "#,
     );
     let out = fx.run(&["doctor"]);
-    assert!(!out.status.success(), "expected doctor to fail on duplicate output");
+    assert!(
+        !out.status.success(),
+        "expected doctor to fail on duplicate output"
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("same.o"), "got: {stdout}");
 }
@@ -879,8 +885,14 @@ fn status_json_output() {
     "#,
     );
     let out = fx.run_ok(&["status", "--json"]);
-    assert!(out.contains("\"target\""), "expected JSON target field: {out}");
-    assert!(out.contains("\"state\""), "expected JSON state field: {out}");
+    assert!(
+        out.contains("\"target\""),
+        "expected JSON target field: {out}"
+    );
+    assert!(
+        out.contains("\"state\""),
+        "expected JSON state field: {out}"
+    );
     assert!(out.starts_with('['), "expected JSON array: {out}");
 }
 

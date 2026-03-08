@@ -28,7 +28,10 @@ pub fn run_download(dl: &Download, ui: &UiConfig, quiet: bool) -> Result<bool> {
     fs::create_dir_all(&dl.dest)
         .with_context(|| format!("failed to create directory: {}", dl.dest))?;
 
-    let format = dl.extract.as_deref().unwrap_or_else(|| infer_format(&dl.url));
+    let format = dl
+        .extract
+        .as_deref()
+        .unwrap_or_else(|| infer_format(&dl.url));
 
     let response = ureq::get(&dl.url)
         .call()
@@ -47,11 +50,7 @@ pub fn run_download(dl: &Download, ui: &UiConfig, quiet: bool) -> Result<bool> {
         "tar" => extract_tar(reader, &dl.dest, dl.strip)?,
         "none" => {
             // Save raw file — use the URL's filename.
-            let filename = dl
-                .url
-                .rsplit('/')
-                .next()
-                .unwrap_or("download");
+            let filename = dl.url.rsplit('/').next().unwrap_or("download");
             let out_path = Path::new(&dl.dest).join(filename);
             let mut file = fs::File::create(&out_path)
                 .with_context(|| format!("failed to create {}", out_path.display()))?;
@@ -82,7 +81,10 @@ fn extract_tar(reader: impl Read, dest: &str, strip: u32) -> Result<()> {
 
     for entry in archive.entries().context("failed to read tar entries")? {
         let mut entry = entry.context("failed to read tar entry")?;
-        let orig_path = entry.path().context("invalid path in tar entry")?.into_owned();
+        let orig_path = entry
+            .path()
+            .context("invalid path in tar entry")?
+            .into_owned();
 
         // Strip leading components.
         let components: Vec<_> = orig_path.components().collect();

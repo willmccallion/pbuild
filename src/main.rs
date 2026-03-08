@@ -225,7 +225,11 @@ fn cmd_explain(args: &Args) -> Result<()> {
             }
 
             if rule.retry > 0 {
-                println!("  retry: {} (up to {} attempts)", rule.retry, rule.retry + 1);
+                println!(
+                    "  retry: {} (up to {} attempts)",
+                    rule.retry,
+                    rule.retry + 1
+                );
             }
 
             if let Some(pat) = &rule.for_each {
@@ -277,8 +281,8 @@ fn cmd_doctor(profile: Option<&str>) -> Result<()> {
     let mut pass = 0usize;
     let mut fail = 0usize;
 
-    let ok   = "\x1b[32m✓\x1b[0m";
-    let err  = "\x1b[31m✗\x1b[0m";
+    let ok = "\x1b[32m✓\x1b[0m";
+    let err = "\x1b[31m✗\x1b[0m";
     let warn = "\x1b[33m!\x1b[0m";
 
     // ── Check 1: all command executables exist on PATH ─────────────────────────
@@ -286,15 +290,24 @@ fn cmd_doctor(profile: Option<&str>) -> Result<()> {
         // Collect all commands (command + commands).
         let all_cmds: Vec<&Vec<String>> = {
             let mut v: Vec<&Vec<String>> = Vec::new();
-            if !raw.command.is_empty() { v.push(&raw.command); }
-            for c in &raw.commands { v.push(c); }
+            if !raw.command.is_empty() {
+                v.push(&raw.command);
+            }
+            for c in &raw.commands {
+                v.push(c);
+            }
             v
         };
         for cmd in all_cmds {
             let Some(prog) = cmd.first() else { continue };
             // Skip template placeholders, shell built-ins, and obvious shell vars.
-            if prog.starts_with("{{") || prog == "true" || prog == "false"
-                || prog == "echo" || prog == "sh" || prog == "bash" {
+            if prog.starts_with("{{")
+                || prog == "true"
+                || prog == "false"
+                || prog == "echo"
+                || prog == "sh"
+                || prog == "bash"
+            {
                 continue;
             }
             // Interpolate vars so we check the real binary.
@@ -356,7 +369,10 @@ fn cmd_doctor(profile: Option<&str>) -> Result<()> {
                 continue;
             }
             if let Some(first) = seen.get(raw.output.as_str()) {
-                println!("  {err} output `{}` is claimed by both `{first}` and `{name}`", raw.output);
+                println!(
+                    "  {err} output `{}` is claimed by both `{first}` and `{name}`",
+                    raw.output
+                );
                 fail += 1;
             } else {
                 seen.insert(raw.output.as_str(), name.as_str());
@@ -377,10 +393,10 @@ fn cmd_doctor(profile: Option<&str>) -> Result<()> {
 /// Escape a string for embedding inside a JSON string value.
 fn json_escape(s: &str) -> String {
     s.replace('\\', "\\\\")
-     .replace('"', "\\\"")
-     .replace('\n', "\\n")
-     .replace('\r', "\\r")
-     .replace('\t', "\\t")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
 
 fn cmd_why(target_name: &str, profile: Option<&str>, json: bool) -> Result<()> {
@@ -444,7 +460,9 @@ fn cmd_why(target_name: &str, profile: Option<&str>, json: bool) -> Result<()> {
             })
             .collect();
         let inputs_str = inputs_json.join(",");
-        println!("{{\"target\":\"{target_esc}\",\"reason\":\"{reason_esc}\",\"inputs\":[{inputs_str}]}}");
+        println!(
+            "{{\"target\":\"{target_esc}\",\"reason\":\"{reason_esc}\",\"inputs\":[{inputs_str}]}}"
+        );
         return Ok(());
     }
 
@@ -765,13 +783,14 @@ fn cmd_watch(args: &Args) -> Result<()> {
                 continue;
             }
         };
-        let root = match pbuild::config::resolve_target(&bf, args.targets.first().map(String::as_str)) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("pbuild: {e}");
-                continue;
-            }
-        };
+        let root =
+            match pbuild::config::resolve_target(&bf, args.targets.first().map(String::as_str)) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("pbuild: {e}");
+                    continue;
+                }
+            };
         let plan = match pbuild::graph::build_plan(&rules, &root) {
             Ok(p) => p,
             Err(e) => {
@@ -804,54 +823,96 @@ fn suggest_command(name: &str) -> &'static str {
 
     match name {
         "build" => {
-            if has_cargo { "cargo build" }
-            else if has_npm { "npm run build" }
-            else if has_python { "python -m build" }
-            else if has_go { "go build ./..." }
-            else { "" }
+            if has_cargo {
+                "cargo build"
+            } else if has_npm {
+                "npm run build"
+            } else if has_python {
+                "python -m build"
+            } else if has_go {
+                "go build ./..."
+            } else {
+                ""
+            }
         }
         "test" | "tests" => {
-            if has_cargo { "cargo test" }
-            else if has_npm { "npm test" }
-            else if has_python { "python -m pytest" }
-            else if has_go { "go test ./..." }
-            else { "" }
+            if has_cargo {
+                "cargo test"
+            } else if has_npm {
+                "npm test"
+            } else if has_python {
+                "python -m pytest"
+            } else if has_go {
+                "go test ./..."
+            } else {
+                ""
+            }
         }
         "lint" | "check" => {
-            if has_cargo { "cargo clippy -- -D warnings" }
-            else if has_npm { "npm run lint" }
-            else if has_python { "ruff check ." }
-            else if has_go { "golangci-lint run" }
-            else { "" }
+            if has_cargo {
+                "cargo clippy -- -D warnings"
+            } else if has_npm {
+                "npm run lint"
+            } else if has_python {
+                "ruff check ."
+            } else if has_go {
+                "golangci-lint run"
+            } else {
+                ""
+            }
         }
         "fmt" | "format" => {
-            if has_cargo { "cargo fmt --all" }
-            else if has_npm { "npm run format" }
-            else if has_python { "ruff format ." }
-            else if has_go { "gofmt -w ." }
-            else { "" }
+            if has_cargo {
+                "cargo fmt --all"
+            } else if has_npm {
+                "npm run format"
+            } else if has_python {
+                "ruff format ."
+            } else if has_go {
+                "gofmt -w ."
+            } else {
+                ""
+            }
         }
         "clean" => {
-            if has_cargo { "cargo clean" }
-            else if has_npm { "rm -rf node_modules dist" }
-            else if has_go { "go clean ./..." }
-            else { "" }
+            if has_cargo {
+                "cargo clean"
+            } else if has_npm {
+                "rm -rf node_modules dist"
+            } else if has_go {
+                "go clean ./..."
+            } else {
+                ""
+            }
         }
         "run" | "serve" | "start" => {
-            if has_cargo { "cargo run" }
-            else if has_npm { "npm start" }
-            else if has_python { "python -m app" }
-            else if has_go { "go run ." }
-            else { "" }
+            if has_cargo {
+                "cargo run"
+            } else if has_npm {
+                "npm start"
+            } else if has_python {
+                "python -m app"
+            } else if has_go {
+                "go run ."
+            } else {
+                ""
+            }
         }
         "release" => {
-            if has_cargo { "cargo build --release" }
-            else { "" }
+            if has_cargo {
+                "cargo build --release"
+            } else {
+                ""
+            }
         }
         "install" => {
-            if has_cargo { "cargo install --path ." }
-            else if has_npm { "npm install" }
-            else { "" }
+            if has_cargo {
+                "cargo install --path ."
+            } else if has_npm {
+                "npm install"
+            } else {
+                ""
+            }
         }
         _ => "",
     }
@@ -860,9 +921,9 @@ fn suggest_command(name: &str) -> &'static str {
 /// Suggest "task" for well-known phony names, "file" for everything else.
 fn suggest_type(name: &str) -> &'static str {
     match name {
-        "build" | "test" | "tests" | "lint" | "check" | "fmt" | "format"
-        | "clean" | "run" | "serve" | "start" | "release" | "install"
-        | "ci" | "all" | "dev" | "deploy" | "publish" | "bench" | "doc" | "docs" => "task",
+        "build" | "test" | "tests" | "lint" | "check" | "fmt" | "format" | "clean" | "run"
+        | "serve" | "start" | "release" | "install" | "ci" | "all" | "dev" | "deploy"
+        | "publish" | "bench" | "doc" | "docs" => "task",
         _ => "file",
     }
 }
@@ -884,15 +945,24 @@ fn suggest_inputs(name: &str) -> &'static str {
         || std::path::Path::new("setup.py").exists();
     match name {
         "build" | "release" => {
-            if has_cargo { "src/**/*.rs" }
-            else if has_npm { "src/**/*.{ts,tsx,js,jsx}" }
-            else if has_python { "src/**/*.py" }
-            else { "" }
+            if has_cargo {
+                "src/**/*.rs"
+            } else if has_npm {
+                "src/**/*.{ts,tsx,js,jsx}"
+            } else if has_python {
+                "src/**/*.py"
+            } else {
+                ""
+            }
         }
         "test" | "tests" => {
-            if has_cargo { "src/**/*.rs tests/**/*.rs" }
-            else if has_python { "tests/**/*.py src/**/*.py" }
-            else { "" }
+            if has_cargo {
+                "src/**/*.rs tests/**/*.rs"
+            } else if has_python {
+                "tests/**/*.py src/**/*.py"
+            } else {
+                ""
+            }
         }
         _ => "",
     }
@@ -1520,7 +1590,6 @@ fn cmd_status(target: Option<&str>, profile: Option<&str>, json: bool) -> Result
     }
     Ok(())
 }
-
 
 fn cmd_retry() -> Result<()> {
     let lf = pbuild::hash::read_lock_file().context("failed to read lock file")?;
@@ -2208,7 +2277,8 @@ fn make_vars_to_pbuild(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         // Look for $( or ${
-        if bytes[i] == b'$' && i + 1 < bytes.len() && (bytes[i + 1] == b'(' || bytes[i + 1] == b'{') {
+        if bytes[i] == b'$' && i + 1 < bytes.len() && (bytes[i + 1] == b'(' || bytes[i + 1] == b'{')
+        {
             let close = if bytes[i + 1] == b'(' { b')' } else { b'}' };
             if let Some(end) = bytes[i + 2..].iter().position(|&b| b == close) {
                 let var_name = &s[i + 2..i + 2 + end];
@@ -2345,7 +2415,7 @@ fn run() -> Result<()> {
         return cmd_touch(target);
     }
     if raw_argv.first().map(String::as_str) == Some("graph") {
-        let dot  = raw_argv.iter().any(|a| a == "--dot");
+        let dot = raw_argv.iter().any(|a| a == "--dot");
         let json = raw_argv.iter().any(|a| a == "--json");
         let target = raw_argv
             .iter()
@@ -2367,7 +2437,10 @@ fn run() -> Result<()> {
                     .iter()
                     .map(|d| format!("\"{}\"", json_escape(&d.to_string())))
                     .collect();
-                println!("  {{\"target\":\"{name_esc}\",\"deps\":[{}]}}{comma}", deps_json.join(","));
+                println!(
+                    "  {{\"target\":\"{name_esc}\",\"deps\":[{}]}}{comma}",
+                    deps_json.join(",")
+                );
             }
             println!("]");
         } else if dot {
@@ -2491,8 +2564,7 @@ fn run() -> Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("no rule for target: {root}"))
                 .map_err(config_err)?
         } else {
-            build_plan(&rules, &root)
-                .map_err(|e| config_err(anyhow::anyhow!("{e}")))?
+            build_plan(&rules, &root).map_err(|e| config_err(anyhow::anyhow!("{e}")))?
         };
 
         // Safety check only the rules that will actually run.

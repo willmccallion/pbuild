@@ -388,7 +388,10 @@ fn run_rule(
         for attempt in 1..=total_attempts {
             let err = execute_commands(cfg, ui, rule, effective_commands, streaming, effective_dir);
             match err {
-                None => { last_err = None; break; }
+                None => {
+                    last_err = None;
+                    break;
+                }
                 Some(e) => {
                     // Never retry a timeout — the process was already killed.
                     if is_timeout(&e) {
@@ -528,7 +531,9 @@ fn execute_commands(
                 return Some(e);
             }
         } else if streaming && !cfg.dry_run && !suppress_output {
-            if let Err(e) = run_command_streaming(&effective, effective_dir, &rule.env, rule.max_time) {
+            if let Err(e) =
+                run_command_streaming(&effective, effective_dir, &rule.env, rule.max_time)
+            {
                 return Some(e);
             }
         } else {

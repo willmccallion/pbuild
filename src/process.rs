@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
+pub use std::process::ExitStatus;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::Duration;
-pub use std::process::ExitStatus;
 
 use anyhow::{Result, bail};
 
@@ -36,7 +36,10 @@ impl std::error::Error for TimeoutError {}
 
 /// Wait for `child` to exit, killing it if `timeout` elapses first.
 /// Returns `Err(TimeoutError)` if the process was killed due to timeout.
-fn wait_with_timeout(child: &mut Child, timeout: Option<Duration>) -> Result<std::process::ExitStatus, TimeoutError> {
+fn wait_with_timeout(
+    child: &mut Child,
+    timeout: Option<Duration>,
+) -> Result<std::process::ExitStatus, TimeoutError> {
     let Some(limit) = timeout else {
         return child.wait().map_err(|_| TimeoutError);
     };
@@ -62,7 +65,12 @@ fn wait_with_timeout(child: &mut Child, timeout: Option<Duration>) -> Result<std
 /// `dir` sets the working directory; `None` inherits the current directory.
 /// `env` sets extra environment variables for this invocation only.
 /// `timeout` kills the process if it runs longer than the given duration.
-pub fn run_command(argv: &[String], dir: Option<&str>, env: &HashMap<String, String>, timeout: Option<Duration>) -> Result<Vec<u8>> {
+pub fn run_command(
+    argv: &[String],
+    dir: Option<&str>,
+    env: &HashMap<String, String>,
+    timeout: Option<Duration>,
+) -> Result<Vec<u8>> {
     let (program, rest) = match argv {
         [] => return Ok(Vec::new()),
         [program, rest @ ..] => (program, rest),
@@ -84,12 +92,22 @@ pub fn run_command(argv: &[String], dir: Option<&str>, env: &HashMap<String, Str
 
     if timeout.is_none() {
         // Fast path: no timeout, use the simpler blocking `.output()`.
-        let Output { status, stdout, stderr } = cmd.output()?;
+        let Output {
+            status,
+            stdout,
+            stderr,
+        } = cmd.output()?;
         let mut combined = stdout;
         combined.extend_from_slice(&stderr);
         if !status.success() {
-            let code = status.code().map_or("signal".to_string(), |c| c.to_string());
-            bail!("exited {code}: {}\n{}", argv.join(" "), String::from_utf8_lossy(&combined));
+            let code = status
+                .code()
+                .map_or("signal".to_string(), |c| c.to_string());
+            bail!(
+                "exited {code}: {}\n{}",
+                argv.join(" "),
+                String::from_utf8_lossy(&combined)
+            );
         }
         return Ok(combined);
     }
@@ -114,8 +132,8 @@ pub fn run_command(argv: &[String], dir: Option<&str>, env: &HashMap<String, Str
         buf
     });
 
-    let status = wait_with_timeout(&mut child, timeout)
-        .map_err(|_| anyhow::anyhow!(TimeoutError))?;
+    let status =
+        wait_with_timeout(&mut child, timeout).map_err(|_| anyhow::anyhow!(TimeoutError))?;
 
     let stdout = stdout_thread.join().unwrap_or_default();
     let stderr = stderr_thread.join().unwrap_or_default();
@@ -143,7 +161,12 @@ pub fn run_command(argv: &[String], dir: Option<&str>, env: &HashMap<String, Str
 /// printed so the caller does not need to display it again.
 /// `env` sets extra environment variables for this invocation only.
 /// `timeout` kills the process if it runs longer than the given duration.
-pub fn run_command_streaming(argv: &[String], dir: Option<&str>, env: &HashMap<String, String>, timeout: Option<Duration>) -> Result<()> {
+pub fn run_command_streaming(
+    argv: &[String],
+    dir: Option<&str>,
+    env: &HashMap<String, String>,
+    timeout: Option<Duration>,
+) -> Result<()> {
     let (program, rest) = match argv {
         [] => return Ok(()),
         [program, rest @ ..] => (program, rest),
@@ -205,8 +228,8 @@ pub fn run_command_streaming(argv: &[String], dir: Option<&str>, env: &HashMap<S
         }
     });
 
-    let status = wait_with_timeout(&mut child, timeout)
-        .map_err(|_| anyhow::anyhow!(TimeoutError))?;
+    let status =
+        wait_with_timeout(&mut child, timeout).map_err(|_| anyhow::anyhow!(TimeoutError))?;
     let _ = stdout_thread.join();
     let _ = stderr_thread.join();
 
@@ -224,7 +247,12 @@ pub fn run_command_streaming(argv: &[String], dir: Option<&str>, env: &HashMap<S
 /// terminal. Used for interactive programs (e.g. QEMU serial console).
 /// Output is not captured — it goes straight to the terminal.
 /// `timeout` kills the process if it runs longer than the given duration.
-pub fn run_command_tty(argv: &[String], dir: Option<&str>, env: &HashMap<String, String>, timeout: Option<Duration>) -> Result<()> {
+pub fn run_command_tty(
+    argv: &[String],
+    dir: Option<&str>,
+    env: &HashMap<String, String>,
+    timeout: Option<Duration>,
+) -> Result<()> {
     let (program, rest) = match argv {
         [] => return Ok(()),
         [program, rest @ ..] => (program, rest),
@@ -245,8 +273,8 @@ pub fn run_command_tty(argv: &[String], dir: Option<&str>, env: &HashMap<String,
     }
 
     let mut child = cmd.spawn()?;
-    let status = wait_with_timeout(&mut child, timeout)
-        .map_err(|_| anyhow::anyhow!(TimeoutError))?;
+    let status =
+        wait_with_timeout(&mut child, timeout).map_err(|_| anyhow::anyhow!(TimeoutError))?;
 
     if !status.success() {
         let code = status

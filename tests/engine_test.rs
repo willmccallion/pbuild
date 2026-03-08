@@ -250,7 +250,10 @@ fn on_failure_runs_after_rule_fails() {
     let _ = execute_plan(&serial_cfg(), &plan);
 
     let contents = std::fs::read_to_string(log.path()).unwrap();
-    assert!(contents.contains("cleanup"), "on_failure command did not run");
+    assert!(
+        contents.contains("cleanup"),
+        "on_failure command did not run"
+    );
 }
 
 #[test]
@@ -270,7 +273,10 @@ fn on_failure_does_not_run_on_success() {
     execute_plan(&serial_cfg(), &plan).unwrap();
 
     let contents = std::fs::read_to_string(log.path()).unwrap_or_default();
-    assert!(!contents.contains("cleanup"), "on_failure should not run on success");
+    assert!(
+        !contents.contains("cleanup"),
+        "on_failure should not run on success"
+    );
 }
 
 #[test]

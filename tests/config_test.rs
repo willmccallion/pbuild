@@ -133,7 +133,10 @@ fn parse_duration_handles_formats() {
     assert_eq!(parse_duration("5m").unwrap(), Duration::from_secs(300));
     assert_eq!(parse_duration("1h").unwrap(), Duration::from_secs(3600));
     assert_eq!(parse_duration("1h30m").unwrap(), Duration::from_secs(5400));
-    assert_eq!(parse_duration("2h5m10s").unwrap(), Duration::from_secs(7510));
+    assert_eq!(
+        parse_duration("2h5m10s").unwrap(),
+        Duration::from_secs(7510)
+    );
     assert!(parse_duration("bad").is_err());
     assert!(parse_duration("5x").is_err());
 }
