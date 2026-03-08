@@ -150,6 +150,11 @@ fn parse_args() -> Result<Args> {
     Ok(args)
 }
 
+/// Wrap a config-phase error so `main` can assign it exit code 2.
+fn config_err(e: anyhow::Error) -> anyhow::Error {
+    anyhow::Error::new(pbuild::process::ConfigError(e))
+}
+
 fn remove_if_exists(path: &str) -> Result<()> {
     match fs::remove_file(path) {
         Ok(()) => {
@@ -2396,10 +2401,10 @@ fn run() -> Result<()> {
         return cmd_init(args.detect);
     }
 
-    let mut bf = load_build_file()?;
+    let mut bf = load_build_file().map_err(config_err)?;
 
     if let Some(profile) = &args.profile {
-        apply_profile(&mut bf, profile)?;
+        apply_profile(&mut bf, profile).map_err(config_err)?;
     }
 
     if args.list {
@@ -2413,7 +2418,7 @@ fn run() -> Result<()> {
             .unwrap_or(4)
     });
 
-    let rules = to_rules(&bf)?;
+    let rules = to_rules(&bf).map_err(config_err)?;
 
     if args.watch {
         return cmd_watch(&args);
@@ -2453,14 +2458,14 @@ fn run() -> Result<()> {
     // runs each plan sequentially in order.
     let target_names: Vec<&str> = if args.targets.is_empty() {
         // Default target — resolve once.
-        let root = resolve_target(&bf, None)?;
+        let root = resolve_target(&bf, None).map_err(config_err)?;
         vec![Box::leak(root.to_string().into_boxed_str())]
     } else {
         args.targets.iter().map(String::as_str).collect()
     };
 
     for target_name in &target_names {
-        let root = resolve_target(&bf, Some(target_name))?;
+        let root = resolve_target(&bf, Some(target_name)).map_err(config_err)?;
 
         let plan = if args.only {
             rules
@@ -2471,9 +2476,11 @@ fn run() -> Result<()> {
                     r.deps.clear();
                     vec![r]
                 })
-                .ok_or_else(|| anyhow::anyhow!("no rule for target: {root}"))?
+                .ok_or_else(|| anyhow::anyhow!("no rule for target: {root}"))
+                .map_err(config_err)?
         } else {
-            build_plan(&rules, &root).map_err(|e| anyhow::anyhow!("{e}"))?
+            build_plan(&rules, &root)
+                .map_err(|e| config_err(anyhow::anyhow!("{e}")))?
         };
 
         // Safety check only the rules that will actually run.
@@ -2486,7 +2493,7 @@ fn run() -> Result<()> {
                 eprintln!(
                     "pbuild: refusing to run. review the commands and pass --trust to proceed."
                 );
-                return Err(anyhow::anyhow!("unsafe commands detected"));
+                return Err(config_err(anyhow::anyhow!("unsafe commands detected")));
             }
         }
 
@@ -2505,10 +2512,36 @@ fn run() -> Result<()> {
 }
 
 fn main() -> ExitCode {
-    if let Err(e) = run() {
-        eprintln!("pbuild: {e}");
-        ExitCode::FAILURE
-    } else {
-        ExitCode::SUCCESS
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("pbuild: {e}");
+            exit_code_for(&e)
+        }
     }
+}
+
+/// Map an error to the appropriate exit code:
+/// - 1: build failure (rule exited nonzero)
+/// - 2: config/parse error
+/// - 3: timeout
+fn exit_code_for(e: &anyhow::Error) -> ExitCode {
+    if e.downcast_ref::<pbuild::process::TimeoutError>().is_some() {
+        return ExitCode::from(3);
+    }
+    if e.downcast_ref::<pbuild::process::ConfigError>().is_some() {
+        return ExitCode::from(2);
+    }
+    // Walk the chain — a config error may be wrapped in anyhow context layers.
+    let mut src: Option<&(dyn std::error::Error + 'static)> = e.source();
+    while let Some(s) = src {
+        if s.downcast_ref::<pbuild::process::TimeoutError>().is_some() {
+            return ExitCode::from(3);
+        }
+        if s.downcast_ref::<pbuild::process::ConfigError>().is_some() {
+            return ExitCode::from(2);
+        }
+        src = s.source();
+    }
+    ExitCode::FAILURE // code 1
 }

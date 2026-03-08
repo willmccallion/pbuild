@@ -10,6 +10,22 @@ use anyhow::{Result, bail};
 #[derive(Debug)]
 pub struct TimeoutError;
 
+/// Marker error wrapping a config/parse failure (exit code 2).
+#[derive(Debug)]
+pub struct ConfigError(pub anyhow::Error);
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::error::Error for ConfigError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source()
+    }
+}
+
 impl std::fmt::Display for TimeoutError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "timed out")

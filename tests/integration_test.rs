@@ -974,3 +974,39 @@ fn no_gha_annotations_without_ci_env() {
         "unexpected GHA annotation without CI env: {stderr}"
     );
 }
+
+#[test]
+fn exit_code_build_failure_is_1() {
+    let fx = Fixture::new();
+    fx.write(
+        "pbuild.toml",
+        r#"
+["fail"]
+command = ["false"]
+"#,
+    );
+    let out = fx.run(&["fail"]);
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[test]
+fn exit_code_config_error_is_2() {
+    let fx = Fixture::new();
+    // No pbuild.toml at all — load_build_file fails → ConfigError → exit 2
+    let out = fx.run(&["build"]);
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn exit_code_invalid_target_is_2() {
+    let fx = Fixture::new();
+    fx.write(
+        "pbuild.toml",
+        r#"
+["build"]
+command = ["true"]
+"#,
+    );
+    let out = fx.run(&["nonexistent_target"]);
+    assert_eq!(out.status.code(), Some(2));
+}
