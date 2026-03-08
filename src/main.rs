@@ -1643,17 +1643,6 @@ fn run() -> Result<()> {
 
     let rules = to_rules(&bf)?;
 
-    if !args.trust && !bf.config.trust {
-        let warnings = safety_warnings(&rules);
-        if !warnings.is_empty() {
-            for w in &warnings {
-                eprintln!("pbuild: unsafe: {w}");
-            }
-            eprintln!("pbuild: refusing to run. review the commands and pass --trust to proceed.");
-            return Err(anyhow::anyhow!("unsafe commands detected"));
-        }
-    }
-
     if args.watch {
         return cmd_watch(&args);
     }
@@ -1701,6 +1690,18 @@ fn run() -> Result<()> {
     } else {
         build_plan(&rules, &root).map_err(|e| anyhow::anyhow!("{e}"))?
     };
+
+    // Safety check only the rules that will actually run.
+    if !args.trust && !bf.config.trust {
+        let warnings = safety_warnings(&plan);
+        if !warnings.is_empty() {
+            for w in &warnings {
+                eprintln!("pbuild: unsafe: {w}");
+            }
+            eprintln!("pbuild: refusing to run. review the commands and pass --trust to proceed.");
+            return Err(anyhow::anyhow!("unsafe commands detected"));
+        }
+    }
 
     execute_plan(&cfg, &plan)?;
 
