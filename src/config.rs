@@ -224,6 +224,9 @@ pub struct RawRule {
     /// Number of times to retry on failure (not on timeout). Default 0.
     #[serde(default)]
     pub retry: u32,
+    /// Command to run after all retries are exhausted. Empty = no cleanup.
+    #[serde(default)]
+    pub on_failure: Vec<String>,
 }
 
 /// A download step: fetch a URL and optionally extract it.
@@ -542,6 +545,7 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
                         .with_context(|| format!("rule `{name}`: invalid max_time"))?
                 },
                 retry: raw.retry,
+                on_failure: interpolate_vec(&bf.vars, &raw.on_failure, !raw.shell),
             })
         })
         .collect()

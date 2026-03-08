@@ -363,6 +363,7 @@ fn run_rule(
                     // Clear the progress line before printing the error.
                     ui.clear_progress();
                 }
+                run_on_failure(cfg, ui, rule);
                 if !cfg.quiet {
                     if is_timeout(&e) {
                         ui.print_timeout(&rule.target, rule.max_time.unwrap_or_default());
@@ -391,6 +392,7 @@ fn run_rule(
                         if !cfg.quiet {
                             ui.print_timeout(&rule.target, rule.max_time.unwrap_or_default());
                         }
+                        run_on_failure(cfg, ui, rule);
                         return Err(e);
                     }
                     if attempt < total_attempts {
@@ -406,6 +408,7 @@ fn run_rule(
             }
         }
         if let Some(e) = last_err {
+            run_on_failure(cfg, ui, rule);
             if !cfg.quiet {
                 ui.print_fail(&rule.target);
             }
@@ -562,6 +565,30 @@ fn flush_captured(cfg: &Config, ui: &UiConfig, captured: &[u8]) {
 /// Returns true if the error originated from a process timeout.
 fn is_timeout(e: &anyhow::Error) -> bool {
     e.downcast_ref::<TimeoutError>().is_some()
+}
+
+/// Run the rule's `on_failure` command if one is set.
+/// Output is shown dimmed. Errors are printed but do not replace the original failure.
+fn run_on_failure(cfg: &Config, ui: &UiConfig, rule: &Rule) {
+    if rule.on_failure.is_empty() {
+        return;
+    }
+    // on_failure is always treated as a raw argv — shell-wrapping is the caller's
+    // responsibility (e.g. write ["sh", "-c", "rm -f partial.*"]).
+    let cmd: Vec<String> = rule.on_failure.clone();
+    if !cfg.quiet {
+        ui.print_on_failure_cmd(&cmd);
+    }
+    // Run without timeout — cleanup should not be killed.
+    match run_command(&cmd, rule.dir.as_deref(), &rule.env, None) {
+        Ok(out) if !out.is_empty() => {
+            ui.print_output(&out);
+        }
+        Err(e) => {
+            eprintln!("pbuild: on_failure command failed: {e}");
+        }
+        _ => {}
+    }
 }
 
 fn any_dirty_lf(lock_file: &RwLock<LockFile>, inputs: &[String]) -> Result<bool> {

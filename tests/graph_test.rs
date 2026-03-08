@@ -23,6 +23,7 @@ fn mk_rule(target: Target, deps: Vec<Target>) -> Rule {
         downloads: vec![],
         max_time: None,
         retry: 0,
+        on_failure: vec![],
     }
 }
 

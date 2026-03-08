@@ -26,6 +26,7 @@ fn mk_task(target: Target, deps: Vec<Target>, command: Vec<&str>) -> Rule {
         downloads: vec![],
         max_time: None,
         retry: 0,
+        on_failure: vec![],
     }
 }
 
@@ -87,6 +88,7 @@ fn execution_order_respects_dependencies() {
             downloads: vec![],
             max_time: None,
             retry: 0,
+            on_failure: vec![],
         },
         Rule {
             target: b.clone(),
@@ -109,6 +111,7 @@ fn execution_order_respects_dependencies() {
             downloads: vec![],
             max_time: None,
             retry: 0,
+            on_failure: vec![],
         },
         Rule {
             target: c.clone(),
@@ -131,6 +134,7 @@ fn execution_order_respects_dependencies() {
             downloads: vec![],
             max_time: None,
             retry: 0,
+            on_failure: vec![],
         },
     ];
 
@@ -226,6 +230,47 @@ fn retry_exhausted_returns_error() {
     rule.retry = 2; // 2 retries = 3 total attempts, all fail
     let plan = build_plan(&[rule], &t).unwrap();
     assert!(execute_plan(&serial_cfg(), &plan).is_err());
+}
+
+#[test]
+fn on_failure_runs_after_rule_fails() {
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let log_path = log.path().to_str().unwrap().to_string();
+
+    let t = Target::Task("broken".into());
+    let mut rule = mk_task(t.clone(), vec![], vec!["false"]);
+    // on_failure writes a sentinel to the log file.
+    rule.on_failure = vec![
+        "sh".to_string(),
+        "-c".to_string(),
+        format!("echo cleanup >> {log_path}"),
+    ];
+
+    let plan = build_plan(&[rule], &t).unwrap();
+    let _ = execute_plan(&serial_cfg(), &plan);
+
+    let contents = std::fs::read_to_string(log.path()).unwrap();
+    assert!(contents.contains("cleanup"), "on_failure command did not run");
+}
+
+#[test]
+fn on_failure_does_not_run_on_success() {
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let log_path = log.path().to_str().unwrap().to_string();
+
+    let t = Target::Task("ok".into());
+    let mut rule = mk_task(t.clone(), vec![], vec!["true"]);
+    rule.on_failure = vec![
+        "sh".to_string(),
+        "-c".to_string(),
+        format!("echo cleanup >> {log_path}"),
+    ];
+
+    let plan = build_plan(&[rule], &t).unwrap();
+    execute_plan(&serial_cfg(), &plan).unwrap();
+
+    let contents = std::fs::read_to_string(log.path()).unwrap_or_default();
+    assert!(!contents.contains("cleanup"), "on_failure should not run on success");
 }
 
 #[test]

@@ -94,4 +94,8 @@ pub struct Rule {
     pub progress: OutputMode,
     /// Files to download (and optionally extract) before running commands.
     pub downloads: Vec<Download>,
+    /// Command to run if this rule fails (after all retries are exhausted).
+    /// Always executed regardless of failure reason; output is shown dimmed.
+    /// Empty vec means no cleanup command.
+    pub on_failure: Vec<String>,
 }

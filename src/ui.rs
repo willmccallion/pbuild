@@ -162,6 +162,12 @@ impl UiConfig {
         self.log(&format!("  ✗ {target}"));
     }
 
+    /// `    ~ cleanup command`  — shown before running on_failure command.
+    pub fn print_on_failure_cmd(&self, cmd: &[String]) {
+        println!("    {} {}", self.dim("~"), self.dim(&cmd.join(" ")));
+        self.log(&format!("    ~ {}", cmd.join(" ")));
+    }
+
     /// `  ↻ fetch  (attempt 2/3)`
     pub fn print_retry(&self, target: &impl std::fmt::Display, attempt: u32, total: u32) {
         let msg = format!("(attempt {attempt}/{total})");
