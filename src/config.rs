@@ -221,6 +221,9 @@ pub struct RawRule {
     /// Maximum time this rule may run. Accepts "5m", "30s", "1h", or plain seconds.
     /// Overrides `[config] max_time` when set.
     pub max_time: Option<String>,
+    /// Number of times to retry on failure (not on timeout). Default 0.
+    #[serde(default)]
+    pub retry: u32,
 }
 
 /// A download step: fetch a URL and optionally extract it.
@@ -538,6 +541,7 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
                         .transpose()
                         .with_context(|| format!("rule `{name}`: invalid max_time"))?
                 },
+                retry: raw.retry,
             })
         })
         .collect()

@@ -378,14 +378,36 @@ fn run_rule(
         }
     } else {
         for_each_count = None;
-        let err = execute_commands(cfg, ui, rule, effective_commands, streaming, effective_dir);
-        if let Some(e) = err {
-            if !cfg.quiet {
-                if is_timeout(&e) {
-                    ui.print_timeout(&rule.target, rule.max_time.unwrap_or_default());
-                } else {
-                    ui.print_fail(&rule.target);
+        // Total attempts = 1 initial + retry count.
+        let total_attempts = rule.retry + 1;
+        let mut last_err: Option<anyhow::Error> = None;
+        for attempt in 1..=total_attempts {
+            let err = execute_commands(cfg, ui, rule, effective_commands, streaming, effective_dir);
+            match err {
+                None => { last_err = None; break; }
+                Some(e) => {
+                    // Never retry a timeout — the process was already killed.
+                    if is_timeout(&e) {
+                        if !cfg.quiet {
+                            ui.print_timeout(&rule.target, rule.max_time.unwrap_or_default());
+                        }
+                        return Err(e);
+                    }
+                    if attempt < total_attempts {
+                        // More attempts remain — show retry line and loop.
+                        if !cfg.quiet {
+                            ui.print_retry(&rule.target, attempt + 1, total_attempts);
+                        }
+                        last_err = Some(e);
+                    } else {
+                        last_err = Some(e);
+                    }
                 }
+            }
+        }
+        if let Some(e) = last_err {
+            if !cfg.quiet {
+                ui.print_fail(&rule.target);
             }
             return Err(e);
         }

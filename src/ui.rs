@@ -162,6 +162,13 @@ impl UiConfig {
         self.log(&format!("  ✗ {target}"));
     }
 
+    /// `  ↻ fetch  (attempt 2/3)`
+    pub fn print_retry(&self, target: &impl std::fmt::Display, attempt: u32, total: u32) {
+        let msg = format!("(attempt {attempt}/{total})");
+        println!("  {} {target}  {}", self.yellow("↻"), self.dim(&msg));
+        self.log(&format!("  ↻ {target}  (attempt {attempt}/{total})"));
+    }
+
     /// `  ✗ test  timed out after 5m`
     pub fn print_timeout(&self, target: &impl std::fmt::Display, limit: std::time::Duration) {
         let secs = limit.as_secs();

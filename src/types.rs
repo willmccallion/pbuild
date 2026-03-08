@@ -48,6 +48,9 @@ pub struct Rule {
     /// Maximum time this rule may run before it is killed.
     /// `None` means no limit. Inherited from `[config] max_time` if not set on the rule.
     pub max_time: Option<std::time::Duration>,
+    /// Number of times to retry this rule on failure before giving up.
+    /// Default 0 (no retries). Timeouts are not retried.
+    pub retry: u32,
     /// The artifact or task this rule produces.
     pub target: Target,
     /// Targets that must be up-to-date before this runs.

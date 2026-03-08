@@ -25,6 +25,7 @@ fn mk_task(target: Target, deps: Vec<Target>, command: Vec<&str>) -> Rule {
         progress: pbuild::types::OutputMode::Display,
         downloads: vec![],
         max_time: None,
+        retry: 0,
     }
 }
 
@@ -85,6 +86,7 @@ fn execution_order_respects_dependencies() {
             progress: pbuild::types::OutputMode::Display,
             downloads: vec![],
             max_time: None,
+            retry: 0,
         },
         Rule {
             target: b.clone(),
@@ -106,6 +108,7 @@ fn execution_order_respects_dependencies() {
             progress: pbuild::types::OutputMode::Display,
             downloads: vec![],
             max_time: None,
+            retry: 0,
         },
         Rule {
             target: c.clone(),
@@ -127,6 +130,7 @@ fn execution_order_respects_dependencies() {
             progress: pbuild::types::OutputMode::Display,
             downloads: vec![],
             max_time: None,
+            retry: 0,
         },
     ];
 
@@ -188,6 +192,40 @@ fn keep_going_runs_independent_rules_after_failure() {
     // But `ok` must have run.
     let contents = std::fs::read_to_string(log.path()).unwrap();
     assert!(contents.contains("ok"), "expected `ok` to have run");
+}
+
+#[test]
+fn retry_succeeds_after_initial_failure() {
+    // Write a counter file; the rule fails until it has been attempted enough times.
+    let counter = tempfile::NamedTempFile::new().unwrap();
+    let counter_path = counter.path().to_str().unwrap().to_string();
+    // Script: increment counter, fail on first attempt (count == 1), succeed on second.
+    let script = format!(
+        "c=$(cat {p} 2>/dev/null || echo 0); echo $((c+1)) > {p}; [ $((c+1)) -ge 2 ]",
+        p = counter_path
+    );
+    let t = Target::Task("flaky".into());
+    let mut rule = mk_task(t.clone(), vec![], vec!["sh", "-c", &script]);
+    rule.retry = 1; // 1 retry = 2 total attempts
+    let rules = vec![rule];
+    let plan = build_plan(&rules, &t).unwrap();
+    execute_plan(&serial_cfg(), &plan).unwrap();
+    // Verify the rule ran twice (counter == 2).
+    let count: u32 = std::fs::read_to_string(counter.path())
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert_eq!(count, 2);
+}
+
+#[test]
+fn retry_exhausted_returns_error() {
+    let t = Target::Task("always-fail".into());
+    let mut rule = mk_task(t.clone(), vec![], vec!["false"]);
+    rule.retry = 2; // 2 retries = 3 total attempts, all fail
+    let plan = build_plan(&[rule], &t).unwrap();
+    assert!(execute_plan(&serial_cfg(), &plan).is_err());
 }
 
 #[test]
