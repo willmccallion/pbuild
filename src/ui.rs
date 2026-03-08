@@ -162,6 +162,20 @@ impl UiConfig {
         self.log(&format!("  ✗ {target}"));
     }
 
+    /// `  ✗ test  timed out after 5m`
+    pub fn print_timeout(&self, target: &impl std::fmt::Display, limit: std::time::Duration) {
+        let secs = limit.as_secs();
+        let limit_str = if secs % 3600 == 0 {
+            format!("{}h", secs / 3600)
+        } else if secs % 60 == 0 {
+            format!("{}m", secs / 60)
+        } else {
+            format!("{secs}s")
+        };
+        println!("  {} {target}  timed out after {limit_str}", self.red("✗"));
+        self.log(&format!("  ✗ {target}  timed out after {limit_str}"));
+    }
+
     /// Flush captured subprocess output (stdout+stderr) to the terminal and log.
     /// Called once per rule after it completes, ensuring atomic non-interleaved output.
     pub fn print_output(&self, output: &[u8]) {

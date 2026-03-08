@@ -1,7 +1,7 @@
 use std::fs;
 use std::sync::Mutex;
 
-use pbuild::config::{load_build_file, to_rules};
+use pbuild::config::{load_build_file, parse_duration, to_rules};
 use tempfile::TempDir;
 
 // `set_current_dir` is process-wide, so parallel tests would race.
@@ -122,6 +122,87 @@ fn unknown_var_left_as_is() {
         let bf = load_build_file().unwrap();
         let rules = to_rules(&bf).unwrap();
         assert_eq!(rules[0].commands[0][0], "{{no_such_var}}");
+    });
+}
+
+#[test]
+fn parse_duration_handles_formats() {
+    use std::time::Duration;
+    assert_eq!(parse_duration("30").unwrap(), Duration::from_secs(30));
+    assert_eq!(parse_duration("30s").unwrap(), Duration::from_secs(30));
+    assert_eq!(parse_duration("5m").unwrap(), Duration::from_secs(300));
+    assert_eq!(parse_duration("1h").unwrap(), Duration::from_secs(3600));
+    assert_eq!(parse_duration("1h30m").unwrap(), Duration::from_secs(5400));
+    assert_eq!(parse_duration("2h5m10s").unwrap(), Duration::from_secs(7510));
+    assert!(parse_duration("bad").is_err());
+    assert!(parse_duration("5x").is_err());
+}
+
+#[test]
+fn max_time_parsed_from_rule() {
+    use std::time::Duration;
+    in_tempdir(|_dir| {
+        fs::write(
+            "pbuild.toml",
+            r#"
+            [test]
+            type     = "task"
+            command  = ["true"]
+            max_time = "2m"
+        "#,
+        )
+        .unwrap();
+
+        let bf = load_build_file().unwrap();
+        let rules = to_rules(&bf).unwrap();
+        assert_eq!(rules[0].max_time, Some(Duration::from_secs(120)));
+    });
+}
+
+#[test]
+fn global_max_time_inherited_by_rules() {
+    use std::time::Duration;
+    in_tempdir(|_dir| {
+        fs::write(
+            "pbuild.toml",
+            r#"
+            [config]
+            max_time = "10m"
+
+            [build]
+            type    = "task"
+            command = ["true"]
+        "#,
+        )
+        .unwrap();
+
+        let bf = load_build_file().unwrap();
+        let rules = to_rules(&bf).unwrap();
+        assert_eq!(rules[0].max_time, Some(Duration::from_secs(600)));
+    });
+}
+
+#[test]
+fn rule_max_time_overrides_global() {
+    use std::time::Duration;
+    in_tempdir(|_dir| {
+        fs::write(
+            "pbuild.toml",
+            r#"
+            [config]
+            max_time = "10m"
+
+            [quick]
+            type     = "task"
+            command  = ["true"]
+            max_time = "5s"
+        "#,
+        )
+        .unwrap();
+
+        let bf = load_build_file().unwrap();
+        let rules = to_rules(&bf).unwrap();
+        assert_eq!(rules[0].max_time, Some(Duration::from_secs(5)));
     });
 }
 

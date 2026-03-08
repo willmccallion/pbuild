@@ -45,6 +45,9 @@ pub struct Download {
 /// A build rule.
 #[derive(Debug, Clone)]
 pub struct Rule {
+    /// Maximum time this rule may run before it is killed.
+    /// `None` means no limit. Inherited from `[config] max_time` if not set on the rule.
+    pub max_time: Option<std::time::Duration>,
     /// The artifact or task this rule produces.
     pub target: Target,
     /// Targets that must be up-to-date before this runs.

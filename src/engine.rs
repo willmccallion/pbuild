@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use crate::depfile;
 use crate::download;
 use crate::hash::{self, LockFile, META_LAST_FAILED};
-use crate::process::{run_command, run_command_streaming, run_command_tty};
+use crate::process::{TimeoutError, run_command, run_command_streaming, run_command_tty};
 use crate::types::{OutputMode, Rule, Target};
 use crate::ui::UiConfig;
 
@@ -364,7 +364,11 @@ fn run_rule(
                     ui.clear_progress();
                 }
                 if !cfg.quiet {
-                    ui.print_fail(&rule.target);
+                    if is_timeout(&e) {
+                        ui.print_timeout(&rule.target, rule.max_time.unwrap_or_default());
+                    } else {
+                        ui.print_fail(&rule.target);
+                    }
                 }
                 return Err(e);
             }
@@ -377,7 +381,11 @@ fn run_rule(
         let err = execute_commands(cfg, ui, rule, effective_commands, streaming, effective_dir);
         if let Some(e) = err {
             if !cfg.quiet {
-                ui.print_fail(&rule.target);
+                if is_timeout(&e) {
+                    ui.print_timeout(&rule.target, rule.max_time.unwrap_or_default());
+                } else {
+                    ui.print_fail(&rule.target);
+                }
             }
             return Err(e);
         }
@@ -464,6 +472,7 @@ fn any_dirty(lock_file: &RwLock<LockFile>, inputs: &[String]) -> Result<bool> {
 
 /// Run a list of commands sequentially, returning the first error or `None` on success.
 /// Output is either streamed or buffered+printed depending on the `streaming` flag.
+/// Returns a `TimeoutError`-wrapped error when the process is killed by `max_time`.
 fn execute_commands(
     cfg: &Config,
     ui: &UiConfig,
@@ -486,16 +495,16 @@ fn execute_commands(
             ui.print_command(&effective);
         }
         if rule.tty {
-            if let Err(e) = run_command_tty(&effective, effective_dir, &rule.env) {
+            if let Err(e) = run_command_tty(&effective, effective_dir, &rule.env, rule.max_time) {
                 flush_captured(cfg, ui, &captured);
                 return Some(e);
             }
         } else if streaming && !cfg.dry_run && !suppress_output {
-            if let Err(e) = run_command_streaming(&effective, effective_dir, &rule.env) {
+            if let Err(e) = run_command_streaming(&effective, effective_dir, &rule.env, rule.max_time) {
                 return Some(e);
             }
         } else {
-            match run_command(&effective, effective_dir, &rule.env) {
+            match run_command(&effective, effective_dir, &rule.env, rule.max_time) {
                 Ok(output) => captured.extend_from_slice(&output),
                 Err(e) => {
                     let msg = e.to_string();
@@ -526,6 +535,11 @@ fn flush_captured(cfg: &Config, ui: &UiConfig, captured: &[u8]) {
     } else {
         ui.print_output(captured);
     }
+}
+
+/// Returns true if the error originated from a process timeout.
+fn is_timeout(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<TimeoutError>().is_some()
 }
 
 fn any_dirty_lf(lock_file: &RwLock<LockFile>, inputs: &[String]) -> Result<bool> {

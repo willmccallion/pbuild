@@ -21,6 +21,7 @@ fn mk_rule(target: Target, deps: Vec<Target>) -> Rule {
         for_each: None,
         progress: pbuild::types::OutputMode::Display,
         downloads: vec![],
+        max_time: None,
     }
 }
 

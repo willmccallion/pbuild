@@ -79,6 +79,9 @@ pub struct BuildConfig {
     /// Equivalent to passing `--trust` on the CLI.
     #[serde(default)]
     pub trust: bool,
+    /// Default timeout for all rules. Overridden per-rule by `max_time`.
+    /// Accepts "5m", "30s", "1h", or a plain integer (seconds).
+    pub max_time: Option<String>,
     /// Named profiles that can be activated with `--profile <name>`.
     #[serde(default)]
     pub profiles: HashMap<String, Profile>,
@@ -215,6 +218,9 @@ pub struct RawRule {
     /// Files to download and optionally extract before running commands.
     #[serde(default)]
     pub downloads: Vec<RawDownload>,
+    /// Maximum time this rule may run. Accepts "5m", "30s", "1h", or plain seconds.
+    /// Overrides `[config] max_time` when set.
+    pub max_time: Option<String>,
 }
 
 /// A download step: fetch a URL and optionally extract it.
@@ -234,6 +240,41 @@ pub struct RawDownload {
 
 fn default_true() -> bool {
     true
+}
+
+/// Parse a duration string like "5m", "30s", "1h", "1h30m", or a plain integer (seconds).
+pub fn parse_duration(s: &str) -> anyhow::Result<std::time::Duration> {
+    // Plain integer = seconds.
+    if let Ok(n) = s.parse::<u64>() {
+        return Ok(std::time::Duration::from_secs(n));
+    }
+    let mut total_secs: u64 = 0;
+    let mut num_buf = String::new();
+    for ch in s.chars() {
+        match ch {
+            '0'..='9' => num_buf.push(ch),
+            'h' => {
+                let n: u64 = num_buf.parse().map_err(|_| anyhow::anyhow!("invalid duration: {s}"))?;
+                total_secs += n * 3600;
+                num_buf.clear();
+            }
+            'm' => {
+                let n: u64 = num_buf.parse().map_err(|_| anyhow::anyhow!("invalid duration: {s}"))?;
+                total_secs += n * 60;
+                num_buf.clear();
+            }
+            's' => {
+                let n: u64 = num_buf.parse().map_err(|_| anyhow::anyhow!("invalid duration: {s}"))?;
+                total_secs += n;
+                num_buf.clear();
+            }
+            _ => anyhow::bail!("invalid duration: {s}"),
+        }
+    }
+    if !num_buf.is_empty() {
+        anyhow::bail!("invalid duration: {s} (trailing number with no unit)");
+    }
+    Ok(std::time::Duration::from_secs(total_secs))
 }
 
 fn parse_output_mode(s: &str, rule_name: &str) -> Result<OutputMode> {
@@ -490,6 +531,13 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
                     extract: d.extract.clone(),
                     strip: d.strip,
                 }).collect(),
+                max_time: {
+                    // Rule-level max_time takes precedence over config-level default.
+                    let s = raw.max_time.as_deref().or(bf.config.max_time.as_deref());
+                    s.map(|s| parse_duration(s))
+                        .transpose()
+                        .with_context(|| format!("rule `{name}`: invalid max_time"))?
+                },
             })
         })
         .collect()

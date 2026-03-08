@@ -24,6 +24,7 @@ fn mk_task(target: Target, deps: Vec<Target>, command: Vec<&str>) -> Rule {
         for_each: None,
         progress: pbuild::types::OutputMode::Display,
         downloads: vec![],
+        max_time: None,
     }
 }
 
@@ -83,6 +84,7 @@ fn execution_order_respects_dependencies() {
             for_each: None,
             progress: pbuild::types::OutputMode::Display,
             downloads: vec![],
+            max_time: None,
         },
         Rule {
             target: b.clone(),
@@ -103,6 +105,7 @@ fn execution_order_respects_dependencies() {
             for_each: None,
             progress: pbuild::types::OutputMode::Display,
             downloads: vec![],
+            max_time: None,
         },
         Rule {
             target: c.clone(),
@@ -123,6 +126,7 @@ fn execution_order_respects_dependencies() {
             for_each: None,
             progress: pbuild::types::OutputMode::Display,
             downloads: vec![],
+            max_time: None,
         },
     ];
 
