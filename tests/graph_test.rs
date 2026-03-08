@@ -16,6 +16,7 @@ fn mk_rule(target: Target, deps: Vec<Target>) -> Rule {
         description: None,
         group: None,
         env: std::collections::HashMap::new(),
+        tty: false,
     }
 }
 

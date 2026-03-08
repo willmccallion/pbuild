@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::process::{Command, Output, Stdio};
+pub use std::process::ExitStatus;
 
 use anyhow::{Result, bail};
 
@@ -123,6 +124,41 @@ pub fn run_command_streaming(argv: &[String], dir: Option<&str>, env: &HashMap<S
     let status = child.wait()?;
     let _ = stdout_thread.join();
     let _ = stderr_thread.join();
+
+    if !status.success() {
+        let code = status
+            .code()
+            .map_or("signal".to_string(), |c| c.to_string());
+        bail!("exited {code}: {}", argv.join(" "));
+    }
+
+    Ok(())
+}
+
+/// Run a command with stdin, stdout, and stderr all connected directly to the
+/// terminal. Used for interactive programs (e.g. QEMU serial console).
+/// Output is not captured — it goes straight to the terminal.
+pub fn run_command_tty(argv: &[String], dir: Option<&str>, env: &HashMap<String, String>) -> Result<()> {
+    let (program, rest) = match argv {
+        [] => return Ok(()),
+        [program, rest @ ..] => (program, rest),
+    };
+
+    let mut cmd = Command::new(program);
+    cmd.args(rest)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+
+    if let Some(d) = dir {
+        cmd.current_dir(d);
+    }
+
+    let status = cmd.spawn()?.wait()?;
 
     if !status.success() {
         let code = status

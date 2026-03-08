@@ -21,6 +21,7 @@ struct Args {
     jobs: Option<usize>,
     dry_run: bool,
     verbose: bool,
+    quiet: bool,
     keep_going: bool,
     list: bool,
     help: bool,
@@ -31,7 +32,8 @@ struct Args {
     completion: Option<String>,
     log: Option<String>,
     profile: Option<String>,
-    target: Option<String>,
+    /// All positional targets (supports multi-target: `pbuild fmt lint test`).
+    targets: Vec<String>,
     /// Extra arguments passed after `--` on the command line.
     extra_args: Vec<String>,
 }
@@ -46,6 +48,7 @@ Usage: pbuild [OPTIONS] [TARGET]
 Options:
   -j <N>, --jobs <N>   Run at most N rules in parallel (default: logical CPUs)
   -n, --dry-run        Print commands without running them
+  -q, --quiet          Suppress pbuild status lines; show only command output
   -k, --keep-going     Keep building independent rules after a failure
   -v, --verbose        Print skipped rules
   -l, --list           List all available targets and exit
@@ -70,6 +73,8 @@ Special targets:
   clean <TARGET>       Delete one target's output and its lock entries
   touch <TARGET>       Hash inputs/output now — mark target clean without building
   prune                Remove stale entries from .pbuild.lock
+  last                 Print output from the previous build run
+  retry                Re-run the last failed target
   why <TARGET>         Explain why a target would rebuild
   graph [TARGET]       Print the dependency graph for a target
   graph --dot [TARGET] Emit Graphviz DOT format"
@@ -93,6 +98,7 @@ fn parse_args() -> Result<Args> {
             }
             "-n" | "--dry-run" => args.dry_run = true,
             "-v" | "--verbose" => args.verbose = true,
+            "-q" | "--quiet" => args.quiet = true,
             "-k" | "--keep-going" => args.keep_going = true,
             "-l" | "--list" => args.list = true,
             "-h" | "--help" => args.help = true,
@@ -127,7 +133,7 @@ fn parse_args() -> Result<Args> {
             a if a.starts_with("-j") => {
                 args.jobs = Some(a[2..].parse().context("-j requires a positive integer")?);
             }
-            _ => args.target = Some(arg),
+            _ => args.targets.push(arg),
         }
     }
 
@@ -289,6 +295,7 @@ complete -c pbuild -f
 # Flags
 complete -c pbuild -s j -l jobs        -d 'Max parallel rules' -x
 complete -c pbuild -s n -l dry-run     -d 'Print commands without running'
+complete -c pbuild -s q -l quiet       -d 'Suppress status lines'
 complete -c pbuild -s k -l keep-going  -d 'Keep building after a failure'
 complete -c pbuild -s v -l verbose     -d 'Print skipped rules'
 complete -c pbuild -s l -l list        -d 'List all targets'
@@ -334,7 +341,7 @@ _pbuild_complete() {
 
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "
-            -j --jobs -n --dry-run -k --keep-going -v --verbose
+            -j --jobs -n --dry-run -q --quiet -k --keep-going -v --verbose
             -l --list -h --help -w --watch -p --profile
             --trust --only --detect --log --completion
         " -- "$cur"))
@@ -345,7 +352,7 @@ _pbuild_complete() {
     if [[ -f pbuild.toml ]]; then
         targets=$(pbuild --list 2>/dev/null | grep -oP '^\s+\K\S+')
     fi
-    COMPREPLY=($(compgen -W "init import add edit run status clean touch prune why graph $targets" -- "$cur"))
+    COMPREPLY=($(compgen -W "init import add edit run last retry status clean touch prune why graph $targets" -- "$cur"))
 }
 
 complete -F _pbuild_complete pbuild
@@ -364,6 +371,7 @@ _pbuild() {
     _arguments \
         '(-j --jobs)'{-j,--jobs}'[Max parallel rules]:jobs' \
         '(-n --dry-run)'{-n,--dry-run}'[Print commands without running]' \
+        '(-q --quiet)'{-q,--quiet}'[Suppress status lines]' \
         '(-k --keep-going)'{-k,--keep-going}'[Keep building after failure]' \
         '(-v --verbose)'{-v,--verbose}'[Print skipped rules]' \
         '(-l --list)'{-l,--list}'[List all targets]' \
@@ -375,7 +383,7 @@ _pbuild() {
         '--log[Tee output to a file]:file:_files' \
         '(-p --profile)'{-p,--profile}'[Activate a named profile]:profile' \
         '--completion[Print completion script]:shell:(fish bash zsh)' \
-        ':target:(init import add edit run status clean touch prune why graph '"${targets[@]}"')'
+        ':target:(init import add edit run last retry status clean touch prune why graph '"${targets[@]}"')'
 }
 
 _pbuild
@@ -396,7 +404,7 @@ fn cmd_watch(args: &Args) -> Result<()> {
             .unwrap_or(4)
     });
     let rules = pbuild::config::to_rules(&bf)?;
-    let root = pbuild::config::resolve_target(&bf, args.target.as_deref())?;
+    let root = pbuild::config::resolve_target(&bf, args.targets.first().map(String::as_str))?;
     let plan = pbuild::graph::build_plan(&rules, &root).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     // Collect all input files across all rules in the plan.
@@ -411,6 +419,7 @@ fn cmd_watch(args: &Args) -> Result<()> {
         jobs,
         dry_run: args.dry_run,
         verbose: args.verbose,
+        quiet: args.quiet,
         keep_going: args.keep_going,
         env: bf.config.env.clone(),
         ui: bf.ui.clone(),
@@ -474,7 +483,7 @@ fn cmd_watch(args: &Args) -> Result<()> {
                 continue;
             }
         };
-        let root = match pbuild::config::resolve_target(&bf, args.target.as_deref()) {
+        let root = match pbuild::config::resolve_target(&bf, args.targets.first().map(String::as_str)) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("pbuild: {e}");
@@ -492,6 +501,7 @@ fn cmd_watch(args: &Args) -> Result<()> {
             jobs,
             dry_run: args.dry_run,
             verbose: args.verbose,
+            quiet: args.quiet,
             keep_going: args.keep_going,
             env: bf.config.env.clone(),
             ui: bf.ui.clone(),
@@ -770,22 +780,23 @@ fn detect_template() -> String {
         let ws_flag = if is_workspace { " --workspace" } else { "" };
         out.push_str(&format!(
             "[vars]\n\
-             cargo  = \"cargo\"\n\
-             python = \"{venv_python}\"\n\
+             cargo   = \"cargo\"\n\
+             maturin = [\".venv/bin/maturin\", \"maturin\"]\n\
+             python  = [\".venv/bin/python3\", \".venv/bin/python\", \"python3\"]\n\
              \n\
              [build]\n\
              group       = \"Build\"\n\
              description = \"Install Python extension (editable)\"\n\
              type        = \"task\"\n\
              inputs      = [\"src/**/*.rs\", \"Cargo.toml\"]\n\
-             command     = [\"maturin\", \"develop\", \"--release\"]\n\
+             command     = [\"{{{{maturin}}}}\", \"develop\", \"--release\"]\n\
              \n\
              [wheel]\n\
              group       = \"Build\"\n\
              description = \"Build distributable wheel\"\n\
              type        = \"task\"\n\
              inputs      = [\"src/**/*.rs\", \"Cargo.toml\"]\n\
-             command     = [\"maturin\", \"build\", \"--release\"]\n\
+             command     = [\"{{{{maturin}}}}\", \"build\", \"--release\"]\n\
              \n\
              [check]\n\
              group       = \"Build\"\n\
@@ -1111,6 +1122,46 @@ fn cmd_status(target: Option<&str>, profile: Option<&str>) -> Result<()> {
         } else {
             println!("  {name:<col$} clean");
         }
+    }
+    Ok(())
+}
+
+fn cmd_last() -> Result<()> {
+    match fs::read_to_string(".pbuild.last") {
+        Ok(contents) => {
+            print!("{contents}");
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("pbuild: no previous build output (.pbuild.last not found)");
+            Ok(())
+        }
+        Err(e) => Err(e).context("failed to read .pbuild.last"),
+    }
+}
+
+fn cmd_retry() -> Result<()> {
+    let target = match fs::read_to_string(".pbuild.last-failed") {
+        Ok(t) => t.trim().to_string(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("pbuild: no previous failed target (.pbuild.last-failed not found)");
+            return Ok(());
+        }
+        Err(e) => return Err(e).context("failed to read .pbuild.last-failed"),
+    };
+    if target.is_empty() {
+        eprintln!("pbuild: .pbuild.last-failed is empty");
+        return Ok(());
+    }
+    println!("pbuild: retrying {target}");
+    // Re-exec ourselves with the failed target.
+    let exe = std::env::current_exe().context("could not find pbuild executable")?;
+    let status = std::process::Command::new(exe)
+        .arg(&target)
+        .status()
+        .context("failed to exec pbuild")?;
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
     }
     Ok(())
 }
@@ -1900,6 +1951,12 @@ fn run() -> Result<()> {
     if raw_argv.first().map(String::as_str) == Some("prune") {
         return cmd_prune();
     }
+    if raw_argv.first().map(String::as_str) == Some("last") {
+        return cmd_last();
+    }
+    if raw_argv.first().map(String::as_str) == Some("retry") {
+        return cmd_retry();
+    }
     if raw_argv.first().map(String::as_str) == Some("touch") {
         let target = raw_argv
             .get(1)
@@ -1938,11 +1995,13 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
-    if args.target.as_deref() == Some("clean") {
+    let first_target = args.targets.first().map(String::as_str);
+
+    if first_target == Some("clean") {
         return cmd_clean();
     }
 
-    if args.target.as_deref() == Some("init") {
+    if first_target == Some("init") {
         return cmd_init(args.detect);
     }
 
@@ -1969,7 +2028,13 @@ fn run() -> Result<()> {
         return cmd_watch(&args);
     }
 
-    let root = resolve_target(&bf, args.target.as_deref())?;
+    // Always write output to .pbuild.last (overwrite, no ANSI codes).
+    let last_file = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(".pbuild.last")
+        .ok();
 
     let log_file = args
         .log
@@ -1983,8 +2048,14 @@ fn run() -> Result<()> {
         })
         .transpose()?;
 
+    // Combine explicit --log and implicit .pbuild.last into the UI log slot.
+    // If both are set, prefer --log (user-specified); .pbuild.last still gets
+    // written via the log field since we can only store one file there.
+    // For simplicity, --log wins; .pbuild.last is used when --log is absent.
+    let log = log_file.or(last_file).map(|f| Arc::new(Mutex::new(f)));
+
     let ui = pbuild::ui::UiConfig {
-        log: log_file.map(|f| Arc::new(Mutex::new(f))),
+        log,
         ..bf.ui.clone()
     };
 
@@ -1992,40 +2063,59 @@ fn run() -> Result<()> {
         jobs,
         dry_run: args.dry_run,
         verbose: args.verbose,
+        quiet: args.quiet,
         keep_going: args.keep_going,
         env: bf.config.env.clone(),
         ui,
         extra_args: args.extra_args.clone(),
     };
 
-    let plan = if args.only {
-        // Run just the single target — no dependency resolution.
-        // Clear deps so the wave scheduler doesn't wait for them.
-        rules
-            .into_iter()
-            .find(|r| r.target == root)
-            .map(|mut r| {
-                r.deps.clear();
-                vec![r]
-            })
-            .ok_or_else(|| anyhow::anyhow!("no rule for target: {root}"))?
+    // Collect the set of targets to build. Multi-target: `pbuild fmt lint test`
+    // runs each plan sequentially in order.
+    let target_names: Vec<&str> = if args.targets.is_empty() {
+        // Default target — resolve once.
+        let root = resolve_target(&bf, None)?;
+        vec![Box::leak(root.to_string().into_boxed_str())]
     } else {
-        build_plan(&rules, &root).map_err(|e| anyhow::anyhow!("{e}"))?
+        args.targets.iter().map(String::as_str).collect()
     };
 
-    // Safety check only the rules that will actually run.
-    if !args.trust && !bf.config.trust {
-        let warnings = safety_warnings(&plan);
-        if !warnings.is_empty() {
-            for w in &warnings {
-                eprintln!("pbuild: unsafe: {w}");
+    for target_name in &target_names {
+        let root = resolve_target(&bf, Some(target_name))?;
+
+        let plan = if args.only {
+            rules
+                .iter()
+                .find(|r| r.target == root)
+                .map(|r| {
+                    let mut r = r.clone();
+                    r.deps.clear();
+                    vec![r]
+                })
+                .ok_or_else(|| anyhow::anyhow!("no rule for target: {root}"))?
+        } else {
+            build_plan(&rules, &root).map_err(|e| anyhow::anyhow!("{e}"))?
+        };
+
+        // Safety check only the rules that will actually run.
+        if !args.trust && !bf.config.trust {
+            let warnings = safety_warnings(&plan);
+            if !warnings.is_empty() {
+                for w in &warnings {
+                    eprintln!("pbuild: unsafe: {w}");
+                }
+                eprintln!(
+                    "pbuild: refusing to run. review the commands and pass --trust to proceed."
+                );
+                return Err(anyhow::anyhow!("unsafe commands detected"));
             }
-            eprintln!("pbuild: refusing to run. review the commands and pass --trust to proceed.");
-            return Err(anyhow::anyhow!("unsafe commands detected"));
         }
+
+        execute_plan(&cfg, &plan)?;
     }
 
-    execute_plan(&cfg, &plan)?;
+    // On success, clear last-failed marker.
+    let _ = fs::remove_file(".pbuild.last-failed");
 
     Ok(())
 }

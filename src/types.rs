@@ -49,4 +49,7 @@ pub struct Rule {
     pub group: Option<String>,
     /// Environment variables set for this rule's commands only.
     pub env: std::collections::HashMap<String, String>,
+    /// If true, connect stdin to the terminal (for interactive programs like QEMU).
+    /// Implies streaming output. Only valid when the rule runs alone (wave size 1).
+    pub tty: bool,
 }

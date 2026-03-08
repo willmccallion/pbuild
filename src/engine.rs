@@ -8,7 +8,7 @@ use rayon::prelude::*;
 
 use crate::depfile;
 use crate::hash::{self, LockFile};
-use crate::process::{run_command, run_command_streaming};
+use crate::process::{run_command, run_command_streaming, run_command_tty};
 use crate::types::{Rule, Target};
 use crate::ui::UiConfig;
 
@@ -28,6 +28,9 @@ pub struct Config {
     /// Extra arguments passed after `--` on the CLI. Appended to the last
     /// command of the target rule, or inserted at `{{args}}` if present.
     pub extra_args: Vec<String>,
+    /// Suppress pbuild's own status lines (› start, $ cmd, ✓ done).
+    /// Command output is still shown.
+    pub quiet: bool,
 }
 
 impl Default for Config {
@@ -44,6 +47,7 @@ impl Default for Config {
                 log: None,
             },
             extra_args: Vec::new(),
+            quiet: false,
         }
     }
 }
@@ -124,11 +128,19 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
                     done.insert(rule.target.clone());
                 }
                 Err(e) if cfg.keep_going => {
-                    cfg.ui.print_fail(&rule.target);
+                    if !cfg.quiet {
+                        cfg.ui.print_fail(&rule.target);
+                    }
                     eprintln!("pbuild: {e}");
+                    // Record the failed target for `pbuild retry`.
+                    let _ = std::fs::write(".pbuild.last-failed", rule.target.to_string());
                     failures.push(e);
                 }
-                Err(e) => return Err(e),
+                Err(e) => {
+                    // Record the failed target for `pbuild retry`.
+                    let _ = std::fs::write(".pbuild.last-failed", rules.last().map(|r| r.target.to_string()).unwrap_or_default());
+                    return Err(e);
+                }
             }
         }
 
@@ -266,7 +278,9 @@ fn run_rule(
         return Ok(None);
     }
 
-    ui.print_start(&rule.target);
+    if !cfg.quiet {
+        ui.print_start(&rule.target);
+    }
     let start = Instant::now();
     let mut captured: Vec<u8> = Vec::new();
 
@@ -303,8 +317,16 @@ fn run_rule(
             } else {
                 cmd.clone()
             };
-        ui.print_command(&effective);
-        if streaming && !cfg.dry_run {
+        if !cfg.quiet {
+            ui.print_command(&effective);
+        }
+        if rule.tty {
+            // tty = true: connect stdin/stdout/stderr directly to the terminal.
+            if let Err(e) = run_command_tty(&effective, effective_dir, &rule.env) {
+                run_err = Some(e);
+                break;
+            }
+        } else if streaming && !cfg.dry_run {
             // Single-rule wave: stream output directly to the terminal so the
             // user sees progress in real time instead of waiting for completion.
             if let Err(e) = run_command_streaming(&effective, effective_dir, &rule.env) {
@@ -333,13 +355,22 @@ fn run_rule(
     }
     // Print buffered output (only non-empty when not streaming).
     if !captured.is_empty() {
-        ui.print_output(&captured);
+        // In quiet mode print output without indentation prefix.
+        if cfg.quiet {
+            let _ = std::io::Write::write_all(&mut std::io::stdout(), &captured);
+        } else {
+            ui.print_output(&captured);
+        }
     }
     if let Some(e) = run_err {
-        ui.print_fail(&rule.target);
+        if !cfg.quiet {
+            ui.print_fail(&rule.target);
+        }
         return Err(e);
     }
-    ui.print_done(&rule.target, start.elapsed());
+    if !cfg.quiet {
+        ui.print_done(&rule.target, start.elapsed());
+    }
 
     // Parse depfile (if any) and discover additional inputs.
     let discovered: Vec<String> = match &rule.depfile {
