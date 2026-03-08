@@ -11,6 +11,7 @@
 
 pub mod config;
 pub mod depfile;
+pub mod download;
 pub mod engine;
 pub mod graph;
 pub mod hash;

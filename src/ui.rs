@@ -110,6 +110,31 @@ impl UiConfig {
         self.log(&format!("  ✓ {target}  {secs:.2}s"));
     }
 
+    /// `  ✓ bench  (100 files)  1.23s`
+    pub fn print_done_count(
+        &self,
+        target: &impl std::fmt::Display,
+        count: usize,
+        elapsed: std::time::Duration,
+    ) {
+        let secs = elapsed.as_secs_f64();
+        let time_str = format!("{secs:.2}s");
+        let count_str = format!("({count} files)");
+        println!(
+            "  {} {target}  {}  {}",
+            self.green("✓"),
+            self.dim(&count_str),
+            self.dim(&time_str)
+        );
+        self.log(&format!("  ✓ {target}  ({count} files)  {secs:.2}s"));
+    }
+
+    /// `    ↓ https://example.com/foo.tar.gz → bench/foo`
+    pub fn print_download(&self, url: &str, dest: &str) {
+        println!("    {} {} {} {}", self.dim("↓"), self.dim(url), self.dim("→"), dest);
+        self.log(&format!("    ↓ {url} → {dest}"));
+    }
+
     /// `  ✗ build`
     pub fn print_fail(&self, target: &impl std::fmt::Display) {
         println!("  {} {target}", self.red("✗"));

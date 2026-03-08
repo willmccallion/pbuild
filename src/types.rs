@@ -16,6 +16,20 @@ impl std::fmt::Display for Target {
     }
 }
 
+/// A file to download and optionally extract before running a rule's commands.
+#[derive(Debug, Clone)]
+pub struct Download {
+    /// URL to fetch.
+    pub url: String,
+    /// Local directory to place the downloaded/extracted files.
+    pub dest: String,
+    /// Archive format to extract: "tar.gz", "tar.xz", "tar.bz2", "tar", "zip", or "none".
+    /// When omitted, pbuild infers from the URL extension.
+    pub extract: Option<String>,
+    /// Strip this many leading path components when extracting (like tar --strip-components).
+    pub strip: u32,
+}
+
 /// A build rule.
 #[derive(Debug, Clone)]
 pub struct Rule {
@@ -55,4 +69,9 @@ pub struct Rule {
     /// If false, skip dirty-checking and always run this rule.
     /// Default is true. Set `cache = false` in pbuild.toml to always re-run.
     pub cache: bool,
+    /// If set, run the rule's commands once per file matching this glob.
+    /// `{{file}}` in commands is substituted with each matched path.
+    pub for_each: Option<String>,
+    /// Files to download (and optionally extract) before running commands.
+    pub downloads: Vec<Download>,
 }

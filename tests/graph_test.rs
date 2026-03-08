@@ -18,6 +18,8 @@ fn mk_rule(target: Target, deps: Vec<Target>) -> Rule {
         env: std::collections::HashMap::new(),
         tty: false,
         cache: true,
+        for_each: None,
+        downloads: vec![],
     }
 }
 

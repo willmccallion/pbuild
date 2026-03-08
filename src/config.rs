@@ -4,7 +4,7 @@ use std::fs;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-use crate::types::{Rule, Target};
+use crate::types::{Download, Rule, Target};
 
 /// Expand a list of glob patterns into concrete file paths.
 /// Exposed so callers outside `config` (e.g. `pbuild why`) can reuse it.
@@ -206,6 +206,27 @@ pub struct RawRule {
     /// Set `cache = false` to always re-run this rule.
     #[serde(default = "default_true")]
     pub cache: bool,
+    /// Glob pattern: run the rule once per matching file, substituting
+    /// `{{file}}` in commands with each path. Timing is aggregated.
+    pub for_each: Option<String>,
+    /// Files to download and optionally extract before running commands.
+    #[serde(default)]
+    pub downloads: Vec<RawDownload>,
+}
+
+/// A download step: fetch a URL and optionally extract it.
+#[derive(Debug, Deserialize)]
+pub struct RawDownload {
+    /// URL to fetch.
+    pub url: String,
+    /// Local directory to extract/place files into.
+    pub dest: String,
+    /// Archive format: "tar.gz", "tar.xz", "tar.bz2", "tar", "zip", or "none".
+    /// Omit to auto-detect from URL extension.
+    pub extract: Option<String>,
+    /// Strip leading path components when extracting (default 0).
+    #[serde(default)]
+    pub strip: u32,
 }
 
 fn default_true() -> bool {
@@ -428,6 +449,13 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
                 }).collect(),
                 tty: raw.tty,
                 cache: raw.cache,
+                for_each: raw.for_each.as_deref().map(|s| interpolate(&bf.vars, s, true)),
+                downloads: raw.downloads.iter().map(|d| Download {
+                    url: interpolate(&bf.vars, &d.url, true),
+                    dest: interpolate(&bf.vars, &d.dest, true),
+                    extract: d.extract.clone(),
+                    strip: d.strip,
+                }).collect(),
             })
         })
         .collect()

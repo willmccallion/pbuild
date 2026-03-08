@@ -91,6 +91,13 @@ commands    = [              # multiple sequential steps (alternative to command
     ["cargo", "build"],
     ["cargo", "test"],
 ]
+cache       = false          # always re-run (default: true)
+for_each    = "test/*.txt"   # run commands once per matching file ({{file}} substituted)
+
+[[build.downloads]]          # download + extract before running commands
+url    = "https://example.com/data.tar.gz"
+dest   = "vendor/data"
+strip  = 1                   # like tar --strip-components
 ```
 
 ### `[config]`
@@ -169,6 +176,9 @@ A profile named `default` is applied automatically on every run.
 | `env` | table | Extra environment variables set only for this rule |
 | `description` | string | Short description shown in `--list` output |
 | `group` | string | Group heading in `--list` output |
+| `for_each` | string | Glob pattern: run commands once per matching file, substituting `{{file}}` |
+| `downloads` | array of tables | Files to download and extract before running commands |
+| `cache` | bool | Set `false` to always re-run this rule (default: `true`) |
 
 ### `type`
 
@@ -266,6 +276,48 @@ Use `makedir` to always invoke `make`:
 type    = "task"
 makedir = "software/linux"
 ```
+
+### `for_each` — run commands per file
+
+Run the rule's commands once for each file matching a glob pattern. `{{file}}` in commands is replaced with each matched path. Output is aggregated and the done line shows the file count:
+
+```toml
+[bench]
+type     = "task"
+for_each = "bench/uf50/*.cnf"
+command  = ["./solver", "{{file}}"]
+```
+
+```
+› bench
+  ✓ bench  (1000 files)  4.21s
+```
+
+### `downloads` — declarative file downloads
+
+Download and extract archives before running a rule's commands. Each download is skipped if `dest/.done` already exists, making repeated runs instant. The `.done` marker is written after a successful download+extract.
+
+```toml
+[fetch-data]
+type    = "task"
+command = ["echo", "data ready"]
+
+[[fetch-data.downloads]]
+url   = "https://example.com/dataset.tar.gz"
+dest  = "data/training"
+strip = 1
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `url` | string | required | URL to fetch (HTTP/HTTPS) |
+| `dest` | string | required | Directory to extract into (created if missing) |
+| `extract` | string | auto-detect | Archive format: `tar.gz`, `tgz`, `tar`, or `none` |
+| `strip` | integer | `0` | Strip this many leading path components (like `tar --strip-components`) |
+
+When `extract` is omitted, pbuild infers the format from the URL extension. Set `extract = "none"` to download the raw file without extracting.
+
+To force a re-download, delete the `dest/.done` marker file.
 
 ### `env` tracking
 

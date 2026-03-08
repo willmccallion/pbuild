@@ -7,6 +7,7 @@ use rayon::ThreadPoolBuilder;
 use rayon::prelude::*;
 
 use crate::depfile;
+use crate::download;
 use crate::hash::{self, LockFile, META_LAST_FAILED};
 use crate::process::{run_command, run_command_streaming, run_command_tty};
 use crate::types::{Rule, Target};
@@ -295,7 +296,12 @@ fn run_rule(
         ui.print_start(&rule.target);
     }
     let start = Instant::now();
-    let mut captured: Vec<u8> = Vec::new();
+
+    // Run any declared downloads before commands.
+    for dl in &rule.downloads {
+        download::run_download(dl, ui, cfg.quiet)
+            .with_context(|| format!("download failed: {}", dl.url))?;
+    }
 
     // If this rule delegates to a subdirectory, override the command list.
     let subdir_commands: Vec<Vec<String>>;
@@ -322,67 +328,57 @@ fn run_rule(
         effective_dir = rule.dir.as_deref();
     }
 
-    let mut run_err: Option<anyhow::Error> = None;
-    for cmd in effective_commands {
-        let effective: Vec<String> =
-            if rule.shell && rule.subdir.is_none() && rule.makedir.is_none() {
-                vec!["sh".to_string(), "-c".to_string(), cmd.join(" ")]
-            } else {
-                cmd.clone()
-            };
-        if !cfg.quiet {
-            ui.print_command(&effective);
+    // for_each: run commands once per matching file, substituting {{file}}.
+    let for_each_count: Option<usize>;
+    if let Some(ref pattern) = rule.for_each {
+        let matches: Vec<std::path::PathBuf> = glob::glob(pattern)
+            .with_context(|| format!("invalid for_each glob: {pattern}"))?
+            .filter_map(std::result::Result::ok)
+            .collect();
+
+        if matches.is_empty() {
+            eprintln!("pbuild: warning: for_each '{pattern}' matched no files");
+            return Ok(None);
         }
-        if rule.tty {
-            // tty = true: connect stdin/stdout/stderr directly to the terminal.
-            if let Err(e) = run_command_tty(&effective, effective_dir, &rule.env) {
-                run_err = Some(e);
-                break;
-            }
-        } else if streaming && !cfg.dry_run {
-            // Single-rule wave: stream output directly to the terminal so the
-            // user sees progress in real time instead of waiting for completion.
-            if let Err(e) = run_command_streaming(&effective, effective_dir, &rule.env) {
-                run_err = Some(e);
-                break;
-            }
-        } else {
-            match run_command(&effective, effective_dir, &rule.env) {
-                Ok(output) => captured.extend_from_slice(&output),
-                Err(e) => {
-                    // Extract any output embedded in the error message and print it
-                    // before surfacing the failure, so the user sees compiler errors.
-                    let msg = e.to_string();
-                    // run_command embeds output after the first newline.
-                    if let Some(pos) = msg.find('\n') {
-                        let output_part = &msg[pos + 1..];
-                        if !output_part.is_empty() {
-                            captured.extend_from_slice(output_part.as_bytes());
-                        }
-                    }
-                    run_err = Some(e);
-                    break;
+
+        let count = matches.len();
+        for_each_count = Some(count);
+
+        for path in &matches {
+            let file_str = path.to_str().unwrap_or_default();
+            let substituted: Vec<Vec<String>> = effective_commands
+                .iter()
+                .map(|cmd| {
+                    cmd.iter()
+                        .map(|tok| tok.replace("{{file}}", file_str))
+                        .collect()
+                })
+                .collect();
+            let err = execute_commands(cfg, ui, rule, &substituted, streaming, effective_dir);
+            if let Some(e) = err {
+                if !cfg.quiet {
+                    ui.print_fail(&rule.target);
                 }
+                return Err(e);
             }
         }
-    }
-    // Print buffered output (only non-empty when not streaming).
-    if !captured.is_empty() {
-        // In quiet mode print output without indentation prefix.
-        if cfg.quiet {
-            let _ = std::io::Write::write_all(&mut std::io::stdout(), &captured);
-        } else {
-            ui.print_output(&captured);
+    } else {
+        for_each_count = None;
+        let err = execute_commands(cfg, ui, rule, effective_commands, streaming, effective_dir);
+        if let Some(e) = err {
+            if !cfg.quiet {
+                ui.print_fail(&rule.target);
+            }
+            return Err(e);
         }
     }
-    if let Some(e) = run_err {
-        if !cfg.quiet {
-            ui.print_fail(&rule.target);
-        }
-        return Err(e);
-    }
+
     if !cfg.quiet {
-        ui.print_done(&rule.target, start.elapsed());
+        if let Some(count) = for_each_count {
+            ui.print_done_count(&rule.target, count, start.elapsed());
+        } else {
+            ui.print_done(&rule.target, start.elapsed());
+        }
     }
 
     // Parse depfile (if any) and discover additional inputs.
@@ -454,6 +450,72 @@ pub fn check_status(rules: &[Rule]) -> Result<Vec<(String, bool)>> {
 /// No declared inputs → always run (returns true).
 fn any_dirty(lock_file: &RwLock<LockFile>, inputs: &[String]) -> Result<bool> {
     any_dirty_lf(lock_file, inputs)
+}
+
+/// Run a list of commands sequentially, returning the first error or `None` on success.
+/// Output is either streamed or buffered+printed depending on the `streaming` flag.
+fn execute_commands(
+    cfg: &Config,
+    ui: &UiConfig,
+    rule: &Rule,
+    commands: &[Vec<String>],
+    streaming: bool,
+    effective_dir: Option<&str>,
+) -> Option<anyhow::Error> {
+    let mut captured: Vec<u8> = Vec::new();
+    let quiet_for_each = rule.for_each.is_some();
+
+    for cmd in commands {
+        let effective: Vec<String> =
+            if rule.shell && rule.subdir.is_none() && rule.makedir.is_none() {
+                vec!["sh".to_string(), "-c".to_string(), cmd.join(" ")]
+            } else {
+                cmd.clone()
+            };
+        if !cfg.quiet && !quiet_for_each {
+            ui.print_command(&effective);
+        }
+        if rule.tty {
+            if let Err(e) = run_command_tty(&effective, effective_dir, &rule.env) {
+                flush_captured(cfg, ui, &captured);
+                return Some(e);
+            }
+        } else if streaming && !cfg.dry_run && !quiet_for_each {
+            if let Err(e) = run_command_streaming(&effective, effective_dir, &rule.env) {
+                return Some(e);
+            }
+        } else {
+            match run_command(&effective, effective_dir, &rule.env) {
+                Ok(output) => captured.extend_from_slice(&output),
+                Err(e) => {
+                    let msg = e.to_string();
+                    if let Some(pos) = msg.find('\n') {
+                        let output_part = &msg[pos + 1..];
+                        if !output_part.is_empty() {
+                            captured.extend_from_slice(output_part.as_bytes());
+                        }
+                    }
+                    flush_captured(cfg, ui, &captured);
+                    return Some(e);
+                }
+            }
+        }
+    }
+    if !quiet_for_each {
+        flush_captured(cfg, ui, &captured);
+    }
+    None
+}
+
+fn flush_captured(cfg: &Config, ui: &UiConfig, captured: &[u8]) {
+    if captured.is_empty() {
+        return;
+    }
+    if cfg.quiet {
+        let _ = std::io::Write::write_all(&mut std::io::stdout(), captured);
+    } else {
+        ui.print_output(captured);
+    }
 }
 
 fn any_dirty_lf(lock_file: &RwLock<LockFile>, inputs: &[String]) -> Result<bool> {
