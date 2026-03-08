@@ -105,6 +105,24 @@ impl UiConfig {
         self.log(&format!("  ✗ {target}"));
     }
 
+    /// Flush captured subprocess output (stdout+stderr) to the terminal and log.
+    /// Called once per rule after it completes, ensuring atomic non-interleaved output.
+    pub fn print_output(&self, output: &[u8]) {
+        if output.is_empty() {
+            return;
+        }
+        let s = String::from_utf8_lossy(output);
+        // Indent each line so it's visually grouped under the rule.
+        for line in s.lines() {
+            println!("    {line}");
+        }
+        // Ensure a trailing newline if the output didn't end with one.
+        if !s.ends_with('\n') {
+            println!();
+        }
+        self.log(&s);
+    }
+
     /// Env-dirty notice.
     pub fn print_env_dirty(&self) {
         println!("{}", self.yellow("  env vars changed — rebuilding all"));

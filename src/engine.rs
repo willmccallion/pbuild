@@ -211,6 +211,7 @@ fn run_rule(
 
     ui.print_start(&rule.target);
     let start = Instant::now();
+    let mut captured: Vec<u8> = Vec::new();
     for cmd in &commands {
         let effective: Vec<String> = if rule.shell {
             vec!["sh".to_string(), "-c".to_string(), cmd.join(" ")]
@@ -218,9 +219,11 @@ fn run_rule(
             cmd.clone()
         };
         ui.print_command(&effective);
-        run_command(&effective, rule.dir.as_deref())?;
+        let output = run_command(&effective, rule.dir.as_deref())?;
+        captured.extend_from_slice(&output);
     }
     ui.print_done(&rule.target, start.elapsed());
+    ui.print_output(&captured);
 
     // Parse depfile (if any) and discover additional inputs.
     let discovered: Vec<String> = match &rule.depfile {

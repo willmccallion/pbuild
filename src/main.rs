@@ -24,6 +24,7 @@ struct Args {
     help: bool,
     trust: bool,
     only: bool,
+    watch: bool,
     log: Option<String>,
     target: Option<String>,
 }
@@ -45,9 +46,11 @@ Options:
       --trust          Skip safety checks for dangerous commands (sudo, rm -rf, etc.)
       --only           Build just the named target without running its dependencies
       --log <file>     Tee pbuild's output lines to a file (appends; no ANSI codes)
+  -w, --watch          Rebuild automatically when input files change
 
 Special targets:
   init                 Write a starter pbuild.toml in the current directory
+  add <name>           Interactively scaffold a new rule in pbuild.toml
   status [TARGET]      Show which targets are dirty (would rebuild)
   clean                Delete all rule outputs and .pbuild.lock
   why <TARGET>         Explain why a target would rebuild"
@@ -67,6 +70,7 @@ fn parse_args() -> Result<Args> {
             "-h" | "--help" => args.help = true,
             "--trust" => args.trust = true,
             "--only" => args.only = true,
+            "-w" | "--watch" => args.watch = true,
             "--log" => {
                 let val = raw
                     .next()
@@ -187,6 +191,188 @@ fn cmd_why(target_name: &str) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn prompt(question: &str, default: &str) -> Result<String> {
+    use std::io::Write as _;
+    if default.is_empty() {
+        print!("{question}: ");
+    } else {
+        print!("{question} [{default}]: ");
+    }
+    std::io::stdout().flush()?;
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let trimmed = input.trim().to_string();
+    if trimmed.is_empty() {
+        Ok(default.to_string())
+    } else {
+        Ok(trimmed)
+    }
+}
+
+fn cmd_watch(args: &Args) -> Result<()> {
+    use notify::{Event, RecursiveMode, Watcher};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let bf = load_build_file()?;
+    let jobs = args.jobs.or(bf.config.jobs).unwrap_or_else(|| {
+        std::thread::available_parallelism()
+            .map(std::num::NonZero::get)
+            .unwrap_or(4)
+    });
+    let rules = pbuild::config::to_rules(&bf)?;
+    let root = pbuild::config::resolve_target(&bf, args.target.as_deref())?;
+    let plan = pbuild::graph::build_plan(&rules, &root).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    // Collect all input files across all rules in the plan.
+    let watch_paths: Vec<std::path::PathBuf> = plan
+        .iter()
+        .flat_map(|r| r.inputs.iter())
+        .map(std::path::PathBuf::from)
+        .chain(std::iter::once(std::path::PathBuf::from("pbuild.toml")))
+        .collect();
+
+    let cfg = pbuild::engine::Config {
+        jobs,
+        dry_run: args.dry_run,
+        verbose: args.verbose,
+        keep_going: args.keep_going,
+        env: bf.config.env.clone(),
+        ui: bf.ui.clone(),
+    };
+
+    let run_build = |cfg: &pbuild::engine::Config, plan: &[pbuild::types::Rule]| {
+        println!("\x1b[2m──────────────────────────────\x1b[0m");
+        if let Err(e) = pbuild::engine::execute_plan(cfg, plan) {
+            eprintln!("pbuild: {e}");
+        }
+    };
+
+    // Initial build.
+    run_build(&cfg, &plan);
+
+    let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
+    let mut watcher = notify::recommended_watcher(tx)?;
+
+    for path in &watch_paths {
+        // Watch the parent directory so renames and new files are caught.
+        let watch_target = if path.is_file() {
+            path.parent().unwrap_or(path)
+        } else {
+            path.as_path()
+        };
+        // Ignore errors for paths that don't exist yet.
+        let _ = watcher.watch(watch_target, RecursiveMode::NonRecursive);
+    }
+    // Always watch the current directory for pbuild.toml changes.
+    watcher.watch(std::path::Path::new("."), RecursiveMode::NonRecursive)?;
+
+    println!("\x1b[2mWatching for changes… (Ctrl-C to stop)\x1b[0m");
+
+    // Debounce: collect events for 50ms before triggering a rebuild.
+    loop {
+        // Block until at least one event arrives.
+        let _ = rx.recv();
+        // Drain any additional events that arrive within the debounce window.
+        std::thread::sleep(Duration::from_millis(50));
+        while rx.try_recv().is_ok() {}
+
+        // Reload plan in case pbuild.toml changed.
+        let bf = match load_build_file() {
+            Ok(bf) => bf,
+            Err(e) => { eprintln!("pbuild: {e}"); continue; }
+        };
+        let rules = match pbuild::config::to_rules(&bf) {
+            Ok(r) => r,
+            Err(e) => { eprintln!("pbuild: {e}"); continue; }
+        };
+        let root = match pbuild::config::resolve_target(&bf, args.target.as_deref()) {
+            Ok(r) => r,
+            Err(e) => { eprintln!("pbuild: {e}"); continue; }
+        };
+        let plan = match pbuild::graph::build_plan(&rules, &root) {
+            Ok(p) => p,
+            Err(e) => { eprintln!("pbuild: {e}"); continue; }
+        };
+        let cfg = pbuild::engine::Config {
+            jobs,
+            dry_run: args.dry_run,
+            verbose: args.verbose,
+            keep_going: args.keep_going,
+            env: bf.config.env.clone(),
+            ui: bf.ui.clone(),
+        };
+        run_build(&cfg, &plan);
+    }
+}
+
+fn cmd_add(name: &str) -> Result<()> {
+    if !std::path::Path::new("pbuild.toml").exists() {
+        anyhow::bail!("no pbuild.toml found — run `pbuild init` first");
+    }
+
+    // Check for duplicate.
+    let existing = fs::read_to_string("pbuild.toml").context("could not read pbuild.toml")?;
+    let header = format!("[{name}]");
+    let quoted_header = format!("[\"{name}\"]");
+    if existing.contains(&header) || existing.contains(&quoted_header) {
+        anyhow::bail!("rule `{name}` already exists in pbuild.toml");
+    }
+
+    println!("Adding rule `{name}` to pbuild.toml");
+    println!("Press Enter to accept defaults.\n");
+
+    let rule_type = prompt("type (task/file)", "task")?;
+    let description = prompt("description", "")?;
+    let group = prompt("group", "")?;
+    let command_str = prompt("command", "")?;
+
+    if command_str.is_empty() {
+        anyhow::bail!("command is required");
+    }
+
+    // Split the command string into an argv array for TOML.
+    let argv: Vec<String> = command_str
+        .split_whitespace()
+        .map(ToString::to_string)
+        .collect();
+    let argv_toml = argv
+        .iter()
+        .map(|a| format!("\"{}\"", a.replace('"', "\\\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    // Build the TOML snippet.
+    let key = if name.contains('.') || name.contains(' ') || name.contains('/') {
+        format!("[\"{name}\"]")
+    } else {
+        format!("[{name}]")
+    };
+
+    let mut snippet = format!("\n{key}\n");
+    if !group.is_empty() {
+        snippet.push_str(&format!("group       = \"{group}\"\n"));
+    }
+    if !description.is_empty() {
+        snippet.push_str(&format!("description = \"{description}\"\n"));
+    }
+    if rule_type == "task" {
+        snippet.push_str("type        = \"task\"\n");
+    }
+    snippet.push_str(&format!("command     = [{argv_toml}]\n"));
+
+    let mut content = existing;
+    // Ensure a trailing newline before appending.
+    if !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push_str(&snippet);
+
+    fs::write("pbuild.toml", &content).context("failed to write pbuild.toml")?;
+    println!("\nAdded `{name}` to pbuild.toml.");
     Ok(())
 }
 
@@ -444,6 +630,12 @@ fn run() -> Result<()> {
         let target = raw_argv.get(1).map(String::as_str);
         return cmd_status(target);
     }
+    if raw_argv.first().map(String::as_str) == Some("add") {
+        let name = raw_argv
+            .get(1)
+            .ok_or_else(|| anyhow::anyhow!("usage: pbuild add <name>"))?;
+        return cmd_add(name);
+    }
 
     let args = parse_args()?;
 
@@ -484,6 +676,10 @@ fn run() -> Result<()> {
             eprintln!("pbuild: refusing to run. review the commands and pass --trust to proceed.");
             return Err(anyhow::anyhow!("unsafe commands detected"));
         }
+    }
+
+    if args.watch {
+        return cmd_watch(&args);
     }
 
     let root = resolve_target(&bf, args.target.as_deref())?;

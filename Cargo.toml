@@ -34,6 +34,7 @@ toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 glob = "0.3"
 is-terminal = "0.4"
+notify = "6"
 
 [dev-dependencies]
 tempfile = "3"
