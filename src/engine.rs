@@ -48,6 +48,7 @@ impl Default for Config {
                 color: None,
                 prefix: None,
                 log: None,
+                gha: false,
             },
             extra_args: Vec::new(),
             quiet: false,
@@ -337,7 +338,9 @@ fn run_rule(
             .collect();
 
         if matches.is_empty() {
-            eprintln!("pbuild: warning: for_each '{pattern}' matched no files");
+            let msg = format!("for_each '{pattern}' matched no files");
+            eprintln!("pbuild: warning: {msg}");
+            ui.gha_warning(&msg);
             return Ok(None);
         }
 

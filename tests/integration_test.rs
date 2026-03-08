@@ -922,3 +922,55 @@ fn why_json_output() {
     assert!(out.contains("\"reason\""), "expected JSON reason: {out}");
     assert!(out.starts_with('{'), "expected JSON object: {out}");
 }
+
+#[test]
+fn gha_error_annotation_on_failure() {
+    let fx = Fixture::new();
+    fx.write(
+        "pbuild.toml",
+        r#"
+        [fail]
+        type    = "task"
+        command = ["false"]
+    "#,
+    );
+    let out = Command::new(pbuild_bin())
+        .args(["fail"])
+        .env("CI", "true")
+        .current_dir(fx.dir.path())
+        .output()
+        .expect("failed to run pbuild");
+
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("::error"),
+        "expected GHA error annotation in stderr: {stderr}"
+    );
+}
+
+#[test]
+fn no_gha_annotations_without_ci_env() {
+    let fx = Fixture::new();
+    fx.write(
+        "pbuild.toml",
+        r#"
+        [fail]
+        type    = "task"
+        command = ["false"]
+    "#,
+    );
+    let out = Command::new(pbuild_bin())
+        .args(["fail"])
+        .env_remove("CI")
+        .current_dir(fx.dir.path())
+        .output()
+        .expect("failed to run pbuild");
+
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("::error"),
+        "unexpected GHA annotation without CI env: {stderr}"
+    );
+}

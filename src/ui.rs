@@ -23,6 +23,9 @@ pub struct UiConfig {
     pub prefix: Option<String>,
     /// Optional log file — pbuild's own output lines are tee'd here (no ANSI codes).
     pub log: Option<Arc<Mutex<std::fs::File>>>,
+    /// Emit GitHub Actions workflow commands (`::error::` / `::warning::`) on failures.
+    /// Set automatically when the `CI` environment variable is `"true"`.
+    pub gha: bool,
 }
 
 impl UiConfig {
@@ -156,8 +159,25 @@ impl UiConfig {
         self.log(&format!("    ↓ {url} → {dest}"));
     }
 
+    /// Emit a GitHub Actions `::error::` annotation to stderr.
+    /// Only called when `gha` is true.
+    fn gha_error(&self, msg: &str) {
+        eprintln!("::error title=pbuild::{msg}");
+    }
+
+    /// Emit a GitHub Actions `::warning::` annotation to stderr.
+    /// Only called when `gha` is true.
+    pub fn gha_warning(&self, msg: &str) {
+        if self.gha {
+            eprintln!("::warning title=pbuild::{msg}");
+        }
+    }
+
     /// `  ✗ build`
     pub fn print_fail(&self, target: &impl std::fmt::Display) {
+        if self.gha {
+            self.gha_error(&format!("Rule `{target}` failed"));
+        }
         println!("  {} {target}", self.red("✗"));
         self.log(&format!("  ✗ {target}"));
     }
@@ -185,6 +205,9 @@ impl UiConfig {
         } else {
             format!("{secs}s")
         };
+        if self.gha {
+            self.gha_error(&format!("Rule `{target}` timed out after {limit_str}"));
+        }
         println!("  {} {target}  timed out after {limit_str}", self.red("✗"));
         self.log(&format!("  ✗ {target}  timed out after {limit_str}"));
     }

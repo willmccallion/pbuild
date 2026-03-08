@@ -300,11 +300,13 @@ fn parse_output_mode(s: &str, rule_name: &str) -> Result<OutputMode> {
 }
 
 fn parse_ui_config(table: &mut toml::Table) -> Result<crate::ui::UiConfig> {
+    let gha = std::env::var("CI").as_deref() == Ok("true");
     let Some(val) = table.remove("ui") else {
         return Ok(crate::ui::UiConfig {
             color: None,
             prefix: None,
             log: None,
+            gha,
         });
     };
     let t: toml::Table = val.try_into().context("invalid [ui] section")?;
@@ -317,6 +319,7 @@ fn parse_ui_config(table: &mut toml::Table) -> Result<crate::ui::UiConfig> {
         color,
         prefix,
         log: None,
+        gha,
     })
 }
 
