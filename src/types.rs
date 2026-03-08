@@ -16,6 +16,18 @@ impl std::fmt::Display for Target {
     }
 }
 
+/// How a rule's progress and command output is displayed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum OutputMode {
+    /// Show all output (default).
+    #[default]
+    Display,
+    /// Suppress command output on success; show on error.
+    Mute,
+    /// For `for_each` rules: show a progress counter instead of per-file output.
+    Percent,
+}
+
 /// A file to download and optionally extract before running a rule's commands.
 #[derive(Debug, Clone)]
 pub struct Download {
@@ -72,6 +84,8 @@ pub struct Rule {
     /// If set, run the rule's commands once per file matching this glob.
     /// `{{file}}` in commands is substituted with each matched path.
     pub for_each: Option<String>,
+    /// Controls how command output and progress is displayed.
+    pub progress: OutputMode,
     /// Files to download (and optionally extract) before running commands.
     pub downloads: Vec<Download>,
 }

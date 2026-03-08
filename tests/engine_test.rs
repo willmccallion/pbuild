@@ -22,6 +22,7 @@ fn mk_task(target: Target, deps: Vec<Target>, command: Vec<&str>) -> Rule {
         tty: false,
         cache: true,
         for_each: None,
+        progress: pbuild::types::OutputMode::Display,
         downloads: vec![],
     }
 }
@@ -80,6 +81,7 @@ fn execution_order_respects_dependencies() {
             tty: false,
             cache: true,
             for_each: None,
+            progress: pbuild::types::OutputMode::Display,
             downloads: vec![],
         },
         Rule {
@@ -99,6 +101,7 @@ fn execution_order_respects_dependencies() {
             tty: false,
             cache: true,
             for_each: None,
+            progress: pbuild::types::OutputMode::Display,
             downloads: vec![],
         },
         Rule {
@@ -118,6 +121,7 @@ fn execution_order_respects_dependencies() {
             tty: false,
             cache: true,
             for_each: None,
+            progress: pbuild::types::OutputMode::Display,
             downloads: vec![],
         },
     ];

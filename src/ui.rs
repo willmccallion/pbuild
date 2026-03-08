@@ -129,6 +129,22 @@ impl UiConfig {
         self.log(&format!("  ✓ {target}  ({count} files)  {secs:.2}s"));
     }
 
+    /// `    [42/1000] bench-uf50` — overwritten in place with `\r`.
+    pub fn print_progress(&self, target: &impl std::fmt::Display, current: usize, total: usize) {
+        let pct = current * 100 / total;
+        let msg = format!("    {} {target}", self.dim(&format!("[{current}/{total}] {pct}%")));
+        // Use \r to overwrite the line in place.
+        print!("\r{msg}");
+        let _ = std::io::stdout().flush();
+    }
+
+    /// Clear the progress line.
+    pub fn clear_progress(&self) {
+        // Overwrite with spaces and return to start of line.
+        print!("\r{}\r", " ".repeat(80));
+        let _ = std::io::stdout().flush();
+    }
+
     /// `    ↓ https://example.com/foo.tar.gz → bench/foo`
     pub fn print_download(&self, url: &str, dest: &str) {
         println!("    {} {} {} {}", self.dim("↓"), self.dim(url), self.dim("→"), dest);

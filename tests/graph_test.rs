@@ -19,6 +19,7 @@ fn mk_rule(target: Target, deps: Vec<Target>) -> Rule {
         tty: false,
         cache: true,
         for_each: None,
+        progress: pbuild::types::OutputMode::Display,
         downloads: vec![],
     }
 }

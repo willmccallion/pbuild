@@ -10,7 +10,7 @@ use crate::depfile;
 use crate::download;
 use crate::hash::{self, LockFile, META_LAST_FAILED};
 use crate::process::{run_command, run_command_streaming, run_command_tty};
-use crate::types::{Rule, Target};
+use crate::types::{OutputMode, Rule, Target};
 use crate::ui::UiConfig;
 
 pub struct Config {
@@ -344,7 +344,10 @@ fn run_rule(
         let count = matches.len();
         for_each_count = Some(count);
 
-        for path in &matches {
+        for (i, path) in matches.iter().enumerate() {
+            if !cfg.quiet && rule.progress == OutputMode::Percent {
+                ui.print_progress(&rule.target, i + 1, count);
+            }
             let file_str = path.to_str().unwrap_or_default();
             let substituted: Vec<Vec<String>> = effective_commands
                 .iter()
@@ -356,11 +359,18 @@ fn run_rule(
                 .collect();
             let err = execute_commands(cfg, ui, rule, &substituted, streaming, effective_dir);
             if let Some(e) = err {
+                if !cfg.quiet && rule.progress == OutputMode::Percent {
+                    // Clear the progress line before printing the error.
+                    ui.clear_progress();
+                }
                 if !cfg.quiet {
                     ui.print_fail(&rule.target);
                 }
                 return Err(e);
             }
+        }
+        if !cfg.quiet && rule.progress == OutputMode::Percent {
+            ui.clear_progress();
         }
     } else {
         for_each_count = None;
@@ -463,7 +473,7 @@ fn execute_commands(
     effective_dir: Option<&str>,
 ) -> Option<anyhow::Error> {
     let mut captured: Vec<u8> = Vec::new();
-    let quiet_for_each = rule.for_each.is_some();
+    let suppress_output = rule.for_each.is_some() || rule.progress != OutputMode::Display;
 
     for cmd in commands {
         let effective: Vec<String> =
@@ -472,7 +482,7 @@ fn execute_commands(
             } else {
                 cmd.clone()
             };
-        if !cfg.quiet && !quiet_for_each {
+        if !cfg.quiet && !suppress_output {
             ui.print_command(&effective);
         }
         if rule.tty {
@@ -480,7 +490,7 @@ fn execute_commands(
                 flush_captured(cfg, ui, &captured);
                 return Some(e);
             }
-        } else if streaming && !cfg.dry_run && !quiet_for_each {
+        } else if streaming && !cfg.dry_run && !suppress_output {
             if let Err(e) = run_command_streaming(&effective, effective_dir, &rule.env) {
                 return Some(e);
             }
@@ -501,7 +511,7 @@ fn execute_commands(
             }
         }
     }
-    if !quiet_for_each {
+    if !suppress_output {
         flush_captured(cfg, ui, &captured);
     }
     None

@@ -4,7 +4,7 @@ use std::fs;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-use crate::types::{Download, Rule, Target};
+use crate::types::{Download, OutputMode, Rule, Target};
 
 /// Expand a list of glob patterns into concrete file paths.
 /// Exposed so callers outside `config` (e.g. `pbuild why`) can reuse it.
@@ -209,6 +209,9 @@ pub struct RawRule {
     /// Glob pattern: run the rule once per matching file, substituting
     /// `{{file}}` in commands with each path. Timing is aggregated.
     pub for_each: Option<String>,
+    /// How output is displayed: "display" (default), "mute", or "percent".
+    #[serde(default)]
+    pub progress: String,
     /// Files to download and optionally extract before running commands.
     #[serde(default)]
     pub downloads: Vec<RawDownload>,
@@ -231,6 +234,15 @@ pub struct RawDownload {
 
 fn default_true() -> bool {
     true
+}
+
+fn parse_output_mode(s: &str, rule_name: &str) -> Result<OutputMode> {
+    match s {
+        "" | "display" => Ok(OutputMode::Display),
+        "mute" => Ok(OutputMode::Mute),
+        "percent" => Ok(OutputMode::Percent),
+        other => bail!("rule `{rule_name}`: unknown progress mode `{other}` (expected display, mute, or percent)"),
+    }
 }
 
 fn parse_ui_config(table: &mut toml::Table) -> Result<crate::ui::UiConfig> {
@@ -450,6 +462,7 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
                 tty: raw.tty,
                 cache: raw.cache,
                 for_each: raw.for_each.as_deref().map(|s| interpolate(&bf.vars, s, true)),
+                progress: parse_output_mode(&raw.progress, name)?,
                 downloads: raw.downloads.iter().map(|d| Download {
                     url: interpolate(&bf.vars, &d.url, true),
                     dest: interpolate(&bf.vars, &d.dest, true),

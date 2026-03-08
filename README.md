@@ -93,6 +93,7 @@ commands    = [              # multiple sequential steps (alternative to command
 ]
 cache       = false          # always re-run (default: true)
 for_each    = "test/*.txt"   # run commands once per matching file ({{file}} substituted)
+progress    = "mute"         # "display" (default), "mute", or "percent"
 
 [[build.downloads]]          # download + extract before running commands
 url    = "https://example.com/data.tar.gz"
@@ -177,6 +178,7 @@ A profile named `default` is applied automatically on every run.
 | `description` | string | Short description shown in `--list` output |
 | `group` | string | Group heading in `--list` output |
 | `for_each` | string | Glob pattern: run commands once per matching file, substituting `{{file}}` |
+| `progress` | string | Output mode: `"display"` (default), `"mute"`, or `"percent"` |
 | `downloads` | array of tables | Files to download and extract before running commands |
 | `cache` | bool | Set `false` to always re-run this rule (default: `true`) |
 
@@ -290,6 +292,43 @@ command  = ["./solver", "{{file}}"]
 
 ```
 › bench
+  ✓ bench  (1000 files)  4.21s
+```
+
+### `progress` — output mode
+
+Controls how a rule's command output is displayed:
+
+- `"display"` (default) — show all output normally
+- `"mute"` — suppress command output on success; errors are still shown
+- `"percent"` — for `for_each` rules, show a live progress counter instead of per-file output
+
+```toml
+[bench]
+type     = "task"
+progress = "mute"
+shell    = true
+command  = ["./solver bench/*.cnf"]
+```
+
+```
+› bench
+  ✓ bench  0.27s
+```
+
+With `progress = "percent"` and `for_each`:
+
+```toml
+[bench]
+type     = "task"
+progress = "percent"
+for_each = "bench/*.cnf"
+command  = ["./solver", "{{file}}"]
+```
+
+```
+› bench
+    [42/1000] 4%  bench
   ✓ bench  (1000 files)  4.21s
 ```
 
