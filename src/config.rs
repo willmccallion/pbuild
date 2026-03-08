@@ -21,8 +21,12 @@ fn expand_globs(patterns: &[String]) -> Result<Vec<String>> {
             .with_context(|| format!("error reading glob pattern: {pattern}"))?;
 
         if matches.is_empty() {
-            // Keep the literal string so the engine can report a meaningful
-            // "missing input" error rather than silently skipping it.
+            // Only warn for actual glob patterns (containing * or ?).
+            // Literal paths (no wildcards) are kept as-is so the engine
+            // can report a meaningful "missing input" error.
+            if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+                eprintln!("pbuild: warning: glob '{pattern}' matched no files");
+            }
             paths.push(pattern.clone());
         } else {
             for path in matches {

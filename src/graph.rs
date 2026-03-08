@@ -10,27 +10,45 @@ use crate::types::{Rule, Target};
 /// ├── rust
 /// └── python
 /// ```
+/// Print an ASCII dependency tree rooted at `root`.
+/// Deps with no matching rule are shown as `name [missing]`.
+/// Already-visited nodes (diamonds) are shown as `name [...]` to avoid infinite recursion.
 pub fn print_graph(rules: &[Rule], root: &Target) {
     let index: HashMap<&Target, &Rule> = rules.iter().map(|r| (&r.target, r)).collect();
-    // Print the root with no connector, then recurse into its deps.
+    let mut seen: HashSet<&Target> = HashSet::new();
     println!("{root}");
     if let Some(rule) = index.get(root) {
+        seen.insert(root);
         let deps = &rule.deps;
         for (i, dep) in deps.iter().enumerate() {
             let last = i == deps.len() - 1;
-            print_node(dep, &index, "", last);
+            print_node(dep, &index, "", last, &mut seen);
         }
     }
 }
 
-fn print_node(
-    target: &Target,
-    index: &HashMap<&Target, &Rule>,
+fn print_node<'a>(
+    target: &'a Target,
+    index: &HashMap<&'a Target, &'a Rule>,
     prefix: &str,
     is_last: bool,
+    seen: &mut HashSet<&'a Target>,
 ) {
     let connector = if is_last { "└── " } else { "├── " };
+
+    if !index.contains_key(target) {
+        // Dep has no rule — flag it.
+        println!("{prefix}{connector}{target} [missing]");
+        return;
+    }
+    if seen.contains(target) {
+        // Already printed this subtree above — avoid infinite recursion.
+        println!("{prefix}{connector}{target} [...]");
+        return;
+    }
+
     println!("{prefix}{connector}{target}");
+    seen.insert(target);
 
     let child_prefix = if is_last {
         format!("{prefix}    ")
@@ -42,7 +60,7 @@ fn print_node(
         let deps = &rule.deps;
         for (i, dep) in deps.iter().enumerate() {
             let last = i == deps.len() - 1;
-            print_node(dep, index, &child_prefix, last);
+            print_node(dep, index, &child_prefix, last, seen);
         }
     }
 }

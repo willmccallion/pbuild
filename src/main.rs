@@ -230,6 +230,15 @@ fn cmd_why(target_name: &str) -> Result<()> {
         }
     }
 
+    if !raw.env.is_empty() {
+        println!("  rule env overrides:");
+        let mut sorted: Vec<_> = raw.env.iter().collect();
+        sorted.sort_by_key(|(k, _)| *k);
+        for (k, v) in sorted {
+            println!("    {k}={v}");
+        }
+    }
+
     Ok(())
 }
 
@@ -477,6 +486,69 @@ fn cmd_watch(args: &Args) -> Result<()> {
     }
 }
 
+/// Guess a sensible default command for a well-known rule name given the project type.
+fn suggest_command(name: &str) -> &'static str {
+    let has_cargo = std::path::Path::new("Cargo.toml").exists();
+    let has_npm = std::path::Path::new("package.json").exists();
+    let has_python = std::path::Path::new("pyproject.toml").exists()
+        || std::path::Path::new("setup.py").exists();
+    let has_go = std::path::Path::new("go.mod").exists();
+
+    match name {
+        "build" => {
+            if has_cargo { "cargo build" }
+            else if has_npm { "npm run build" }
+            else if has_python { "python -m build" }
+            else if has_go { "go build ./..." }
+            else { "" }
+        }
+        "test" | "tests" => {
+            if has_cargo { "cargo test" }
+            else if has_npm { "npm test" }
+            else if has_python { "python -m pytest" }
+            else if has_go { "go test ./..." }
+            else { "" }
+        }
+        "lint" | "check" => {
+            if has_cargo { "cargo clippy -- -D warnings" }
+            else if has_npm { "npm run lint" }
+            else if has_python { "ruff check ." }
+            else if has_go { "golangci-lint run" }
+            else { "" }
+        }
+        "fmt" | "format" => {
+            if has_cargo { "cargo fmt --all" }
+            else if has_npm { "npm run format" }
+            else if has_python { "ruff format ." }
+            else if has_go { "gofmt -w ." }
+            else { "" }
+        }
+        "clean" => {
+            if has_cargo { "cargo clean" }
+            else if has_npm { "rm -rf node_modules dist" }
+            else if has_go { "go clean ./..." }
+            else { "" }
+        }
+        "run" | "serve" | "start" => {
+            if has_cargo { "cargo run" }
+            else if has_npm { "npm start" }
+            else if has_python { "python -m app" }
+            else if has_go { "go run ." }
+            else { "" }
+        }
+        "release" => {
+            if has_cargo { "cargo build --release" }
+            else { "" }
+        }
+        "install" => {
+            if has_cargo { "cargo install --path ." }
+            else if has_npm { "npm install" }
+            else { "" }
+        }
+        _ => "",
+    }
+}
+
 fn cmd_add(name: &str) -> Result<()> {
     if !std::path::Path::new("pbuild.toml").exists() {
         anyhow::bail!("no pbuild.toml found — run `pbuild init` first");
@@ -496,7 +568,8 @@ fn cmd_add(name: &str) -> Result<()> {
     let rule_type = prompt("type (task/file)", "task")?;
     let description = prompt("description", "")?;
     let group = prompt("group", "")?;
-    let command_str = prompt("command", "")?;
+    let default_cmd = suggest_command(name);
+    let command_str = prompt("command", default_cmd)?;
 
     if command_str.is_empty() {
         anyhow::bail!("command is required");
