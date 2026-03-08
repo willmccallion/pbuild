@@ -76,6 +76,7 @@ Special targets:
   touch <TARGET>       Hash inputs/output now — mark target clean without building
   prune                Remove stale entries from .pbuild.lock
   retry                Re-run the last failed target
+  doctor               Check config health (commands, globs, deps, output conflicts)
   why <TARGET>         Explain why a target would rebuild
   graph [TARGET]       Print the dependency graph for a target
   graph --dot [TARGET] Emit Graphviz DOT format"
@@ -150,6 +151,112 @@ fn remove_if_exists(path: &str) -> Result<()> {
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e).with_context(|| format!("failed to remove {path}")),
+    }
+}
+
+fn cmd_doctor(profile: Option<&str>) -> Result<()> {
+    let mut bf = load_build_file()?;
+    if let Some(p) = profile {
+        apply_profile(&mut bf, p)?;
+    }
+
+    let mut pass = 0usize;
+    let mut fail = 0usize;
+
+    let ok   = "\x1b[32m✓\x1b[0m";
+    let err  = "\x1b[31m✗\x1b[0m";
+    let warn = "\x1b[33m!\x1b[0m";
+
+    // ── Check 1: all command executables exist on PATH ─────────────────────────
+    for (name, raw) in &bf.rules {
+        // Collect all commands (command + commands).
+        let all_cmds: Vec<&Vec<String>> = {
+            let mut v: Vec<&Vec<String>> = Vec::new();
+            if !raw.command.is_empty() { v.push(&raw.command); }
+            for c in &raw.commands { v.push(c); }
+            v
+        };
+        for cmd in all_cmds {
+            let Some(prog) = cmd.first() else { continue };
+            // Skip template placeholders, shell built-ins, and obvious shell vars.
+            if prog.starts_with("{{") || prog == "true" || prog == "false"
+                || prog == "echo" || prog == "sh" || prog == "bash" {
+                continue;
+            }
+            // Interpolate vars so we check the real binary.
+            let resolved = pbuild::config::interpolate_pub(&bf.vars, prog);
+            let found = if resolved.contains('/') {
+                std::path::Path::new(&resolved).exists()
+            } else {
+                std::env::var_os("PATH").is_some_and(|p| {
+                    std::env::split_paths(&p).any(|dir| dir.join(&resolved).is_file())
+                })
+            };
+            if found {
+                println!("  {ok} [{name}] command `{resolved}` found");
+                pass += 1;
+            } else {
+                println!("  {err} [{name}] command `{resolved}` not found on PATH");
+                fail += 1;
+            }
+        }
+    }
+
+    // ── Check 2: glob patterns in inputs match at least one file ───────────────
+    for (name, raw) in &bf.rules {
+        for pattern in &raw.inputs {
+            if !pattern.contains('*') && !pattern.contains('?') && !pattern.contains('[') {
+                continue; // literal path — skip glob check
+            }
+            let matches = glob::glob(pattern)
+                .map(|g| g.filter_map(std::result::Result::ok).count())
+                .unwrap_or(0);
+            if matches > 0 {
+                println!("  {ok} [{name}] glob `{pattern}` matched {matches} file(s)");
+                pass += 1;
+            } else {
+                println!("  {warn} [{name}] glob `{pattern}` matched no files");
+                fail += 1;
+            }
+        }
+    }
+
+    // ── Check 3: all deps refer to real rules ──────────────────────────────────
+    for (name, raw) in &bf.rules {
+        for dep in &raw.deps {
+            if bf.rules.contains_key(dep.as_str()) {
+                println!("  {ok} [{name}] dep `{dep}` exists");
+                pass += 1;
+            } else {
+                println!("  {err} [{name}] dep `{dep}` has no rule");
+                fail += 1;
+            }
+        }
+    }
+
+    // ── Check 4: no two rules share the same output ────────────────────────────
+    {
+        let mut seen: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+        for (name, raw) in &bf.rules {
+            if raw.output.is_empty() {
+                continue;
+            }
+            if let Some(first) = seen.get(raw.output.as_str()) {
+                println!("  {err} output `{}` is claimed by both `{first}` and `{name}`", raw.output);
+                fail += 1;
+            } else {
+                seen.insert(raw.output.as_str(), name.as_str());
+            }
+        }
+    }
+
+    println!();
+    if fail == 0 {
+        println!("  \x1b[32mAll checks passed\x1b[0m  ({pass} checks)");
+        Ok(())
+    } else {
+        println!("  \x1b[31m{fail} check(s) failed\x1b[0m, {pass} passed");
+        anyhow::bail!("doctor found problems")
     }
 }
 
@@ -321,6 +428,7 @@ complete -c pbuild -n '__fish_is_first_arg' -a 'status' -d 'Show dirty/clean sta
 complete -c pbuild -n '__fish_is_first_arg' -a 'clean'  -d 'Delete outputs and lock file'
 complete -c pbuild -n '__fish_is_first_arg' -a 'touch'  -d 'Mark target clean without building'
 complete -c pbuild -n '__fish_is_first_arg' -a 'prune'  -d 'Remove stale lock file entries'
+complete -c pbuild -n '__fish_is_first_arg' -a 'doctor' -d 'Check config health'
 complete -c pbuild -n '__fish_is_first_arg' -a 'why'    -d 'Explain why a target rebuilds'
 complete -c pbuild -n '__fish_is_first_arg' -a 'graph'  -d 'Print dependency graph'
 
@@ -355,7 +463,7 @@ _pbuild_complete() {
     if [[ -f pbuild.toml ]]; then
         targets=$(pbuild --list 2>/dev/null | grep -oP '^\s+\K\S+')
     fi
-    COMPREPLY=($(compgen -W "init import add edit run retry status clean touch prune why graph $targets" -- "$cur"))
+    COMPREPLY=($(compgen -W "init import add edit run retry status clean touch prune doctor why graph $targets" -- "$cur"))
 }
 
 complete -F _pbuild_complete pbuild
@@ -386,7 +494,7 @@ _pbuild() {
         '--log[Tee output to a file]:file:_files' \
         '(-p --profile)'{-p,--profile}'[Activate a named profile]:profile' \
         '--completion[Print completion script]:shell:(fish bash zsh)' \
-        ':target:(init import add edit run retry status clean touch prune why graph '"${targets[@]}"')'
+        ':target:(init import add edit run retry status clean touch prune doctor why graph '"${targets[@]}"')'
 }
 
 _pbuild
@@ -2038,6 +2146,9 @@ fn run() -> Result<()> {
     }
     if raw_argv.first().map(String::as_str) == Some("prune") {
         return cmd_prune();
+    }
+    if raw_argv.first().map(String::as_str) == Some("doctor") {
+        return cmd_doctor(early_profile);
     }
 
     if raw_argv.first().map(String::as_str) == Some("retry") {

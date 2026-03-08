@@ -12,6 +12,13 @@ pub fn expand_inputs(patterns: &[String]) -> Result<Vec<String>> {
     expand_globs(patterns)
 }
 
+/// Interpolate `{{name}}` placeholders in a single string using the given vars table.
+/// Falls back to environment variables for unknown keys.
+/// Exposed for use by `pbuild doctor`.
+pub fn interpolate_pub(vars: &std::collections::HashMap<String, String>, s: &str) -> String {
+    interpolate(vars, s, true)
+}
+
 fn expand_globs(patterns: &[String]) -> Result<Vec<String>> {
     let mut paths = Vec::new();
     for pattern in patterns {

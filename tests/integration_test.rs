@@ -765,3 +765,57 @@ fn depfile_mf_flag_injected_automatically() {
         "expected depfile path in injected args: {args}"
     );
 }
+
+#[test]
+fn doctor_passes_on_valid_config() {
+    let fx = Fixture::new();
+    fx.write(
+        "pbuild.toml",
+        r#"
+        [build]
+        type    = "task"
+        command = ["true"]
+    "#,
+    );
+    let out = fx.run_ok(&["doctor"]);
+    assert!(out.contains("All checks passed") || out.contains("✓"), "got: {out}");
+}
+
+#[test]
+fn doctor_fails_on_missing_dep() {
+    let fx = Fixture::new();
+    fx.write(
+        "pbuild.toml",
+        r#"
+        [build]
+        type    = "task"
+        command = ["true"]
+        deps    = ["nonexistent"]
+    "#,
+    );
+    let out = fx.run(&["doctor"]);
+    assert!(!out.status.success(), "expected doctor to fail");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("nonexistent"), "got: {stdout}");
+}
+
+#[test]
+fn doctor_fails_on_duplicate_output() {
+    let fx = Fixture::new();
+    fx.write(
+        "pbuild.toml",
+        r#"
+        [a]
+        command = ["true"]
+        output  = "same.o"
+
+        [b]
+        command = ["true"]
+        output  = "same.o"
+    "#,
+    );
+    let out = fx.run(&["doctor"]);
+    assert!(!out.status.success(), "expected doctor to fail on duplicate output");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("same.o"), "got: {stdout}");
+}
