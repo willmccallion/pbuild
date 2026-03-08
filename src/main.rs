@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use pbuild::{
     config::{BuildFile, apply_profile, expand_inputs, load_build_file, resolve_target, to_rules},
     engine::{Config, check_status, execute_plan},
-    graph::{build_plan, print_graph},
+    graph::{build_plan, print_dot, print_graph},
     hash,
 };
 
@@ -69,8 +69,10 @@ Special targets:
   clean                Delete all rule outputs and .pbuild.lock
   clean <TARGET>       Delete one target's output and its lock entries
   touch <TARGET>       Hash inputs/output now — mark target clean without building
+  prune                Remove stale entries from .pbuild.lock
   why <TARGET>         Explain why a target would rebuild
-  graph [TARGET]       Print the dependency graph for a target"
+  graph [TARGET]       Print the dependency graph for a target
+  graph --dot [TARGET] Emit Graphviz DOT format"
     );
 }
 
@@ -143,8 +145,11 @@ fn remove_if_exists(path: &str) -> Result<()> {
     }
 }
 
-fn cmd_why(target_name: &str) -> Result<()> {
-    let bf = load_build_file()?;
+fn cmd_why(target_name: &str, profile: Option<&str>) -> Result<()> {
+    let mut bf = load_build_file()?;
+    if let Some(p) = profile {
+        apply_profile(&mut bf, p)?;
+    }
     let raw = bf
         .rules
         .get(target_name)
@@ -305,6 +310,7 @@ complete -c pbuild -n '__fish_is_first_arg' -a 'run'    -d 'Build a target (expl
 complete -c pbuild -n '__fish_is_first_arg' -a 'status' -d 'Show dirty/clean state'
 complete -c pbuild -n '__fish_is_first_arg' -a 'clean'  -d 'Delete outputs and lock file'
 complete -c pbuild -n '__fish_is_first_arg' -a 'touch'  -d 'Mark target clean without building'
+complete -c pbuild -n '__fish_is_first_arg' -a 'prune'  -d 'Remove stale lock file entries'
 complete -c pbuild -n '__fish_is_first_arg' -a 'why'    -d 'Explain why a target rebuilds'
 complete -c pbuild -n '__fish_is_first_arg' -a 'graph'  -d 'Print dependency graph'
 
@@ -339,7 +345,7 @@ _pbuild_complete() {
     if [[ -f pbuild.toml ]]; then
         targets=$(pbuild --list 2>/dev/null | grep -oP '^\s+\K\S+')
     fi
-    COMPREPLY=($(compgen -W "init import add edit run status clean touch why graph $targets" -- "$cur"))
+    COMPREPLY=($(compgen -W "init import add edit run status clean touch prune why graph $targets" -- "$cur"))
 }
 
 complete -F _pbuild_complete pbuild
@@ -369,7 +375,7 @@ _pbuild() {
         '--log[Tee output to a file]:file:_files' \
         '(-p --profile)'{-p,--profile}'[Activate a named profile]:profile' \
         '--completion[Print completion script]:shell:(fish bash zsh)' \
-        ':target:(init import add edit run status clean touch why graph '"${targets[@]}"')'
+        ':target:(init import add edit run status clean touch prune why graph '"${targets[@]}"')'
 }
 
 _pbuild
@@ -380,7 +386,10 @@ fn cmd_watch(args: &Args) -> Result<()> {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    let bf = load_build_file()?;
+    let mut bf = load_build_file()?;
+    if let Some(p) = &args.profile {
+        apply_profile(&mut bf, p)?;
+    }
     let jobs = args.jobs.or(bf.config.jobs).unwrap_or_else(|| {
         std::thread::available_parallelism()
             .map(std::num::NonZero::get)
@@ -445,13 +454,19 @@ fn cmd_watch(args: &Args) -> Result<()> {
         while rx.try_recv().is_ok() {}
 
         // Reload plan in case pbuild.toml changed.
-        let bf = match load_build_file() {
+        let mut bf = match load_build_file() {
             Ok(bf) => bf,
             Err(e) => {
                 eprintln!("pbuild: {e}");
                 continue;
             }
         };
+        if let Some(p) = &args.profile {
+            if let Err(e) = apply_profile(&mut bf, p) {
+                eprintln!("pbuild: {e}");
+                continue;
+            }
+        }
         let rules = match pbuild::config::to_rules(&bf) {
             Ok(r) => r,
             Err(e) => {
@@ -1079,8 +1094,11 @@ type        = "task"
 command     = ["echo", "replace me with your clean command"]
 "#;
 
-fn cmd_status(target: Option<&str>) -> Result<()> {
-    let bf = load_build_file()?;
+fn cmd_status(target: Option<&str>, profile: Option<&str>) -> Result<()> {
+    let mut bf = load_build_file()?;
+    if let Some(p) = profile {
+        apply_profile(&mut bf, p)?;
+    }
     let rules = to_rules(&bf)?;
     let root = resolve_target(&bf, target)?;
     let plan = build_plan(&rules, &root).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -1094,6 +1112,62 @@ fn cmd_status(target: Option<&str>) -> Result<()> {
             println!("  {name:<col$} clean");
         }
     }
+    Ok(())
+}
+
+fn cmd_prune() -> Result<()> {
+    let mut lf = hash::read_lock_file()?;
+    if lf.is_empty() {
+        println!("lock file is empty — nothing to prune");
+        return Ok(());
+    }
+
+    // Build the set of all paths still referenced by current rules.
+    let referenced: std::collections::HashSet<String> = if let Ok(bf) = load_build_file() {
+        bf.rules
+            .values()
+            .flat_map(|r| {
+                r.inputs
+                    .iter()
+                    .cloned()
+                    .chain(std::iter::once(r.output.clone()).filter(|s| !s.is_empty()))
+                    .chain(
+                        r.depfile
+                            .iter()
+                            .flat_map(|df| hash::load_depfile_inputs(&lf, df)),
+                    )
+            })
+            .collect()
+    } else {
+        std::collections::HashSet::new()
+    };
+
+    // Remove entries whose file is gone and isn't referenced by any rule.
+    let stale: Vec<String> = lf
+        .keys()
+        .filter(|k| {
+            // Always keep env: and dep: synthetic keys.
+            if k.starts_with("env:") || k.starts_with("dep:") {
+                return false;
+            }
+            let still_exists = std::path::Path::new(k.as_str()).exists();
+            let still_referenced = referenced.contains(k.as_str());
+            !still_exists && !still_referenced
+        })
+        .cloned()
+        .collect();
+
+    if stale.is_empty() {
+        println!("nothing to prune");
+        return Ok(());
+    }
+
+    for key in &stale {
+        lf.remove(key);
+        println!("pruned {key}");
+    }
+    hash::write_lock_file(&lf).context("failed to write lock file")?;
+    println!("pruned {} stale entries", stale.len());
     Ok(())
 }
 
@@ -1466,7 +1540,7 @@ fn cmd_import(makefile_path: &str) -> Result<()> {
                 }
                 // Skip echo-only lines that are just decorative.
                 if !cmd.is_empty() {
-                    current_recipe.push(cmd.to_string());
+                    current_recipe.push(make_vars_to_pbuild(cmd));
                 }
             }
             continue;
@@ -1516,7 +1590,9 @@ fn cmd_import(makefile_path: &str) -> Result<()> {
                 ));
             } else if op != "+=" {
                 // Only store simple assignments; += is too stateful to translate.
-                vars.push((lhs.trim().to_string(), val.to_string()));
+                // Expand any $(VAR) references in the value using already-known vars.
+                let expanded = make_vars_to_pbuild(val);
+                vars.push((lhs.trim().to_string(), expanded));
             }
             continue;
         }
@@ -1695,6 +1771,37 @@ fn find_assignment(line: &str) -> Option<(String, &'static str, String)> {
     None
 }
 
+/// Convert Make-style `$(VAR)` and `${VAR}` references to pbuild `{{VAR}}`.
+/// Leaves `$(shell ...)` and complex expansions unchanged (they'll need manual review).
+fn make_vars_to_pbuild(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        // Look for $( or ${
+        if bytes[i] == b'$' && i + 1 < bytes.len() && (bytes[i + 1] == b'(' || bytes[i + 1] == b'{') {
+            let close = if bytes[i + 1] == b'(' { b')' } else { b'}' };
+            if let Some(end) = bytes[i + 2..].iter().position(|&b| b == close) {
+                let var_name = &s[i + 2..i + 2 + end];
+                // Skip function calls like $(shell ...), $(wildcard ...), $(patsubst ...)
+                let is_func = var_name.contains(' ') || var_name.contains('\t');
+                if is_func {
+                    out.push_str(&s[i..i + 2 + end + 1]);
+                } else {
+                    out.push_str("{{");
+                    out.push_str(var_name);
+                    out.push_str("}}");
+                }
+                i += 2 + end + 1;
+                continue;
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
 /// Very simple shell tokenizer: splits on whitespace, handling single and
 /// double quotes. Good enough for Makefile recipe lines.
 fn shell_split(cmd: &str) -> Vec<String> {
@@ -1731,19 +1838,42 @@ fn shell_split(cmd: &str) -> Vec<String> {
     tokens
 }
 
+/// Extract `--profile <name>` or `-p <name>` from a raw argv slice.
+fn extract_profile(argv: &[String]) -> Option<&str> {
+    let mut iter = argv.iter();
+    while let Some(a) = iter.next() {
+        if a == "--profile" || a == "-p" {
+            return iter.next().map(String::as_str);
+        }
+        if let Some(val) = a.strip_prefix("--profile=") {
+            return Some(val);
+        }
+    }
+    None
+}
+
 #[allow(clippy::too_many_lines)]
 fn run() -> Result<()> {
     // Detect `why` and `status` before full arg parsing — they take their own positional argument.
     let raw_argv: Vec<String> = std::env::args().skip(1).collect();
+    let early_profile = extract_profile(&raw_argv);
+
     if raw_argv.first().map(String::as_str) == Some("why") {
         let target = raw_argv
-            .get(1)
+            .iter()
+            .skip(1)
+            .find(|a| !a.starts_with('-') && *a != early_profile.unwrap_or(""))
+            .map(String::as_str)
             .ok_or_else(|| anyhow::anyhow!("usage: pbuild why <target>"))?;
-        return cmd_why(target);
+        return cmd_why(target, early_profile);
     }
     if raw_argv.first().map(String::as_str) == Some("status") {
-        let target = raw_argv.get(1).map(String::as_str);
-        return cmd_status(target);
+        let target = raw_argv
+            .iter()
+            .skip(1)
+            .find(|a| !a.starts_with('-') && *a != early_profile.unwrap_or(""))
+            .map(String::as_str);
+        return cmd_status(target, early_profile);
     }
     if raw_argv.first().map(String::as_str) == Some("add") {
         let name = raw_argv
@@ -1767,6 +1897,9 @@ fn run() -> Result<()> {
         }
         // Fall through to the normal clean path.
     }
+    if raw_argv.first().map(String::as_str) == Some("prune") {
+        return cmd_prune();
+    }
     if raw_argv.first().map(String::as_str) == Some("touch") {
         let target = raw_argv
             .get(1)
@@ -1774,11 +1907,20 @@ fn run() -> Result<()> {
         return cmd_touch(target);
     }
     if raw_argv.first().map(String::as_str) == Some("graph") {
-        let target = raw_argv.get(1).map(String::as_str);
+        let dot = raw_argv.iter().any(|a| a == "--dot");
+        let target = raw_argv
+            .iter()
+            .skip(1)
+            .find(|a| *a != "--dot")
+            .map(String::as_str);
         let bf = load_build_file()?;
         let rules = to_rules(&bf)?;
         let root = resolve_target(&bf, target)?;
-        print_graph(&rules, &root);
+        if dot {
+            print_dot(&rules, &root);
+        } else {
+            print_graph(&rules, &root);
+        }
         return Ok(());
     }
     // --completion doesn't need a pbuild.toml — detect it early.

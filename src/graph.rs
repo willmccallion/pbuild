@@ -2,6 +2,47 @@ use std::collections::{HashMap, HashSet};
 
 use crate::types::{Rule, Target};
 
+/// Emit a Graphviz DOT representation of the dependency graph rooted at `root`.
+pub fn print_dot(rules: &[Rule], root: &Target) {
+    let index: HashMap<&Target, &Rule> = rules.iter().map(|r| (&r.target, r)).collect();
+    println!("digraph pbuild {{");
+    println!("  rankdir=LR;");
+    println!("  node [shape=box fontname=monospace];");
+
+    let mut visited: HashSet<&Target> = HashSet::new();
+    dot_node(root, &index, &mut visited);
+
+    println!("}}");
+}
+
+fn dot_node<'a>(
+    target: &'a Target,
+    index: &HashMap<&'a Target, &'a Rule>,
+    visited: &mut HashSet<&'a Target>,
+) {
+    if visited.contains(target) {
+        return;
+    }
+    visited.insert(target);
+
+    let label = target.to_string().replace('"', "\\\"");
+
+    if !index.contains_key(target) {
+        println!("  \"{label}\" [style=dashed color=red];");
+        return;
+    }
+
+    println!("  \"{label}\";");
+
+    if let Some(rule) = index.get(target) {
+        for dep in &rule.deps {
+            let dep_label = dep.to_string().replace('"', "\\\"");
+            println!("  \"{label}\" -> \"{dep_label}\";");
+            dot_node(dep, index, visited);
+        }
+    }
+}
+
 /// Print an ASCII representation of the dependency graph rooted at `root`.
 ///
 /// Example output:
