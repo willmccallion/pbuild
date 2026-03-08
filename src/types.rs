@@ -38,6 +38,11 @@ pub struct Rule {
     pub shell: bool,
     /// Working directory for the command, relative to pbuild.toml.
     pub dir: Option<String>,
+    /// Run `pbuild [target]` in the given subdirectory.
+    /// If that directory has no pbuild.toml, falls back to `make [target]`.
+    pub subdir: Option<String>,
+    /// Run `make [target]` in the given subdirectory.
+    pub makedir: Option<String>,
     /// Short description shown in `--list` output.
     pub description: Option<String>,
     /// Group heading for `--list` output (e.g. "Build", "Quality").

@@ -11,6 +11,8 @@ fn mk_rule(target: Target, deps: Vec<Target>) -> Rule {
         commands: vec![vec!["true".to_string()]],
         shell: false,
         dir: None,
+        subdir: None,
+        makedir: None,
         description: None,
         group: None,
     }

@@ -154,6 +154,10 @@ pub struct RawRule {
     pub shell: bool,
     /// Working directory for the command, relative to pbuild.toml.
     pub dir: Option<String>,
+    /// Run `pbuild [target]` in this subdirectory (falls back to `make` if no pbuild.toml).
+    pub subdir: Option<String>,
+    /// Run `make [target]` in this subdirectory.
+    pub makedir: Option<String>,
     /// Short description shown in `--list` output.
     pub description: Option<String>,
     /// Group heading for `--list` output.
@@ -181,6 +185,81 @@ fn parse_ui_config(table: &mut toml::Table) -> Result<crate::ui::UiConfig> {
     })
 }
 
+/// Parse the `[vars]` table, supporting both plain string values and arrays
+/// of fallback candidates.
+///
+/// When a var is an array, pbuild resolves it at load time by checking each
+/// candidate in order:
+///   1. If the candidate contains a path separator or starts with `.`, treat
+///      it as a file path and use it if the file exists.
+///   2. Otherwise treat it as a program name and accept it if `which` finds it
+///      (or it exists as a file directly).
+///
+/// The first candidate that resolves wins. If none resolve, the last candidate
+/// is used as-is (so the error surfaces naturally when the command runs).
+///
+/// Example:
+/// ```toml
+/// [vars]
+/// maturin = [".venv/bin/maturin", "maturin"]
+/// python  = [".venv/bin/python3", "python3", "python"]
+/// ```
+fn parse_vars(val: toml::Value) -> anyhow::Result<HashMap<String, String>> {
+    let table: toml::Table = val.try_into()?;
+    let mut out = HashMap::new();
+    for (key, v) in table {
+        match v {
+            toml::Value::String(s) => {
+                out.insert(key, s);
+            }
+            toml::Value::Array(candidates) => {
+                let strings: Vec<String> = candidates
+                    .into_iter()
+                    .map(|c| {
+                        c.try_into::<String>().map_err(|_| {
+                            anyhow::anyhow!("[vars] `{key}`: fallback array must contain strings")
+                        })
+                    })
+                    .collect::<anyhow::Result<_>>()?;
+
+                if strings.is_empty() {
+                    anyhow::bail!("[vars] `{key}`: fallback array must not be empty");
+                }
+
+                let resolved = strings
+                    .iter()
+                    .find(|candidate| resolve_candidate(candidate))
+                    .cloned()
+                    .unwrap_or_else(|| strings.last().unwrap().clone());
+
+                out.insert(key, resolved);
+            }
+            other => anyhow::bail!(
+                "[vars] `{key}`: expected string or array, got {}",
+                other.type_str()
+            ),
+        }
+    }
+    Ok(out)
+}
+
+/// Return true if `candidate` can be resolved to an executable or existing file.
+fn resolve_candidate(candidate: &str) -> bool {
+    let path = std::path::Path::new(candidate);
+    // Explicit path (relative or absolute) — check if the file exists.
+    if candidate.starts_with('.') || candidate.starts_with('/') || candidate.contains('/') {
+        return path.exists();
+    }
+    // Bare program name — check PATH via `which`.
+    which_exists(candidate)
+}
+
+fn which_exists(name: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|path_var| {
+        std::env::split_paths(&path_var).any(|dir| dir.join(name).is_file())
+    })
+}
+
 /// Parse `pbuild.toml` from the current directory.
 ///
 /// The file is a flat TOML table where `[config]` holds build metadata and
@@ -198,7 +277,7 @@ pub fn load_build_file() -> Result<BuildFile> {
     let ui = parse_ui_config(&mut table)?;
 
     let vars: HashMap<String, String> = match table.remove("vars") {
-        Some(v) => v.try_into().context("invalid [vars] section")?,
+        Some(v) => parse_vars(v).context("invalid [vars] section")?,
         None => HashMap::new(),
     };
 
@@ -257,6 +336,14 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
                 commands,
                 shell: raw.shell,
                 dir: raw.dir.as_deref().map(|s| interpolate(&bf.vars, s, true)),
+                subdir: raw
+                    .subdir
+                    .as_deref()
+                    .map(|s| interpolate(&bf.vars, s, true)),
+                makedir: raw
+                    .makedir
+                    .as_deref()
+                    .map(|s| interpolate(&bf.vars, s, true)),
                 description: raw.description.clone(),
                 group: raw.group.clone(),
             })

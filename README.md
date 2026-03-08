@@ -132,6 +132,8 @@ If a var is not found in `[vars]`, pbuild falls back to the environment.
 | `depfile` | string | Path where the compiler writes a depfile; pbuild injects `-MF` |
 | `shell` | bool | Run via `sh -c` — enables pipes, `&&`, redirects, globs |
 | `dir` | string | Working directory to run the command in |
+| `subdir` | string | Run `pbuild` (or `make` if no pbuild.toml) in a subdirectory |
+| `makedir` | string | Run `make` in a subdirectory |
 | `description` | string | Short description shown in `--list` output |
 | `group` | string | Group heading in `--list` output |
 
@@ -192,6 +194,24 @@ dir     = "frontend"
 command = ["npm", "run", "build"]
 ```
 
+### `subdir` — nested builds
+
+Run `pbuild` in a subdirectory. If that directory has no `pbuild.toml`, pbuild falls back to `make`:
+
+```toml
+[software]
+type   = "task"
+subdir = "software"
+```
+
+Use `makedir` to always invoke `make`:
+
+```toml
+[kernel]
+type    = "task"
+makedir = "software/linux"
+```
+
 ### `env` tracking
 
 Variables listed in `[config] env` are stored in `.pbuild.lock`. If any change between runs, every rule rebuilds — catches the classic mistake of changing `CC` and getting a silently stale binary.
@@ -216,8 +236,11 @@ command = ["sudo", "cp", "app", "/usr/local/bin/app"]
 ## CLI reference
 
 ```
-Usage: pbuild [OPTIONS] [TARGET]
-       pbuild init
+Usage: pbuild [OPTIONS] [TARGET] [-- EXTRA_ARGS]
+       pbuild init [--detect]
+       pbuild import [Makefile]
+       pbuild add <name>
+       pbuild edit [TARGET]
        pbuild status [TARGET]
        pbuild clean
        pbuild why <TARGET>
@@ -232,9 +255,14 @@ Options:
       --trust          Skip safety checks for dangerous commands
       --only           Build just the named target without running its dependencies
       --log <file>     Tee pbuild's output lines to a file (appends; no ANSI codes)
+  --                   Pass remaining arguments to the target command (or {{args}})
 
 Special targets:
   init                 Write a starter pbuild.toml in the current directory
+  init --detect        Auto-detect project type and scaffold real targets
+  import [Makefile]    Convert a Makefile to pbuild.toml (default: Makefile)
+  add <name>           Interactively scaffold a new rule
+  edit [TARGET]        Open pbuild.toml in $EDITOR at the target's rule
   status [TARGET]      Show which targets are dirty (would rebuild)
   clean                Delete all rule outputs and .pbuild.lock
   why <TARGET>         Explain why a target would rebuild

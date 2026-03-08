@@ -612,20 +612,35 @@ fn completion_fish_is_valid_text() {
         .output()
         .expect("failed to run pbuild");
 
-    assert!(out.status.success(), "expected zero exit for --completion fish");
+    assert!(
+        out.status.success(),
+        "expected zero exit for --completion fish"
+    );
 
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
 
     // Must not write to stderr.
-    assert!(stderr.is_empty(), "completion must not write to stderr: {stderr}");
+    assert!(
+        stderr.is_empty(),
+        "completion must not write to stderr: {stderr}"
+    );
 
     // Must be non-empty fish script.
-    assert!(stdout.contains("complete -c pbuild"), "expected fish complete directives: {stdout}");
-    assert!(stdout.contains("__pbuild_targets"), "expected target helper function: {stdout}");
+    assert!(
+        stdout.contains("complete -c pbuild"),
+        "expected fish complete directives: {stdout}"
+    );
+    assert!(
+        stdout.contains("__pbuild_targets"),
+        "expected target helper function: {stdout}"
+    );
 
     // Must not contain anything that looks like a shell escape or injection.
-    assert!(!stdout.contains("$(rm"), "must not contain dangerous subshell");
+    assert!(
+        !stdout.contains("$(rm"),
+        "must not contain dangerous subshell"
+    );
     assert!(!stdout.contains("eval "), "must not contain eval");
 
     // Must not write any files to the temp dir.
@@ -646,10 +661,22 @@ fn completion_bash_is_valid_text() {
 
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("_pbuild_complete"), "expected bash function: {stdout}");
-    assert!(stdout.contains("complete -F _pbuild_complete pbuild"), "expected complete directive: {stdout}");
-    assert!(String::from_utf8_lossy(&out.stderr).is_empty(), "no stderr expected");
-    assert!(fs::read_dir(fx.dir.path()).unwrap().count() == 0, "must not create files");
+    assert!(
+        stdout.contains("_pbuild_complete"),
+        "expected bash function: {stdout}"
+    );
+    assert!(
+        stdout.contains("complete -F _pbuild_complete pbuild"),
+        "expected complete directive: {stdout}"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).is_empty(),
+        "no stderr expected"
+    );
+    assert!(
+        fs::read_dir(fx.dir.path()).unwrap().count() == 0,
+        "must not create files"
+    );
 }
 
 #[test]
@@ -663,10 +690,22 @@ fn completion_zsh_is_valid_text() {
 
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("#compdef pbuild"), "expected zsh compdef: {stdout}");
-    assert!(stdout.contains("_pbuild"), "expected zsh function: {stdout}");
-    assert!(String::from_utf8_lossy(&out.stderr).is_empty(), "no stderr expected");
-    assert!(fs::read_dir(fx.dir.path()).unwrap().count() == 0, "must not create files");
+    assert!(
+        stdout.contains("#compdef pbuild"),
+        "expected zsh compdef: {stdout}"
+    );
+    assert!(
+        stdout.contains("_pbuild"),
+        "expected zsh function: {stdout}"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).is_empty(),
+        "no stderr expected"
+    );
+    assert!(
+        fs::read_dir(fx.dir.path()).unwrap().count() == 0,
+        "must not create files"
+    );
 }
 
 #[test]
@@ -678,9 +717,15 @@ fn completion_unknown_shell_fails() {
         .output()
         .expect("failed to run pbuild");
 
-    assert!(!out.status.success(), "expected nonzero exit for unknown shell");
+    assert!(
+        !out.status.success(),
+        "expected nonzero exit for unknown shell"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("powershell"), "expected shell name in error: {stderr}");
+    assert!(
+        stderr.contains("powershell"),
+        "expected shell name in error: {stderr}"
+    );
 }
 
 #[test]

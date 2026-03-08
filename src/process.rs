@@ -21,7 +21,11 @@ pub fn run_command(argv: &[String], dir: Option<&str>) -> Result<Vec<u8>> {
         cmd.current_dir(d);
     }
 
-    let Output { status, stdout, stderr } = cmd.output()?;
+    let Output {
+        status,
+        stdout,
+        stderr,
+    } = cmd.output()?;
 
     // Interleave isn't possible post-hoc, so emit stderr after stdout.
     // In practice most tools write to stderr for errors and stdout for output,
@@ -33,7 +37,11 @@ pub fn run_command(argv: &[String], dir: Option<&str>) -> Result<Vec<u8>> {
         let code = status
             .code()
             .map_or("signal".to_string(), |c| c.to_string());
-        bail!("exited {code}: {}\n{}", argv.join(" "), String::from_utf8_lossy(&combined));
+        bail!(
+            "exited {code}: {}\n{}",
+            argv.join(" "),
+            String::from_utf8_lossy(&combined)
+        );
     }
 
     Ok(combined)

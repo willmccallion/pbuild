@@ -25,6 +25,9 @@ pub struct Config {
     pub env: Vec<String>,
     /// Terminal output settings.
     pub ui: UiConfig,
+    /// Extra arguments passed after `--` on the CLI. Appended to the last
+    /// command of the target rule, or inserted at `{{args}}` if present.
+    pub extra_args: Vec<String>,
 }
 
 impl Default for Config {
@@ -40,6 +43,7 @@ impl Default for Config {
                 prefix: None,
                 log: None,
             },
+            extra_args: Vec::new(),
         }
     }
 }
@@ -156,6 +160,7 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
 }
 
 /// Returns the elapsed time if the rule ran, or `None` if it was skipped.
+#[allow(clippy::too_many_lines)]
 fn run_rule(
     cfg: &Config,
     env_dirty: bool,
@@ -188,8 +193,8 @@ fn run_rule(
         return Ok(None);
     }
 
-    // Build the final command list, injecting -MF into the last command if
-    // a depfile is declared (mirrors compiler convention: flags come last).
+    // Build the final command list, injecting -MF and extra_args into the
+    // last command if declared (mirrors compiler convention: flags come last).
     let last_idx = rule.commands.len() - 1;
     let commands: Vec<Vec<String>> = rule
         .commands
@@ -197,13 +202,24 @@ fn run_rule(
         .enumerate()
         .map(|(i, cmd)| {
             if i == last_idx {
-                if let Some(df) = &rule.depfile {
-                    return cmd
-                        .iter()
-                        .cloned()
-                        .chain(["-MF".to_string(), df.clone()])
-                        .collect();
+                let mut built: Vec<String> = cmd
+                    .iter()
+                    .flat_map(|tok| {
+                        if tok == "{{args}}" {
+                            cfg.extra_args.clone()
+                        } else {
+                            vec![tok.clone()]
+                        }
+                    })
+                    .collect();
+                // If no {{args}} placeholder was expanded, append extra_args at the end.
+                if !cfg.extra_args.is_empty() && !cmd.iter().any(|t| t == "{{args}}") {
+                    built.extend(cfg.extra_args.iter().cloned());
                 }
+                if let Some(df) = &rule.depfile {
+                    built.extend(["-MF".to_string(), df.clone()]);
+                }
+                return built;
             }
             cmd.clone()
         })
@@ -224,18 +240,66 @@ fn run_rule(
     ui.print_start(&rule.target);
     let start = Instant::now();
     let mut captured: Vec<u8> = Vec::new();
-    for cmd in &commands {
-        let effective: Vec<String> = if rule.shell {
-            vec!["sh".to_string(), "-c".to_string(), cmd.join(" ")]
-        } else {
-            cmd.clone()
-        };
+
+    // If this rule delegates to a subdirectory, override the command list.
+    let subdir_commands: Vec<Vec<String>>;
+    let effective_commands: &[Vec<String>];
+    let effective_dir: Option<&str>;
+
+    if let Some(dir) = rule.subdir.as_deref() {
+        // Prefer pbuild if a pbuild.toml exists, else fall back to make.
+        let has_pbuild = std::path::Path::new(dir).join("pbuild.toml").exists();
+        let tool = if has_pbuild { "pbuild" } else { "make" };
+        let target_str = rule.target.to_string();
+        let cmd = vec![tool.to_string(), target_str];
+        subdir_commands = vec![cmd];
+        effective_commands = &subdir_commands;
+        effective_dir = Some(dir);
+    } else if let Some(dir) = rule.makedir.as_deref() {
+        let target_str = rule.target.to_string();
+        let cmd = vec!["make".to_string(), target_str];
+        subdir_commands = vec![cmd];
+        effective_commands = &subdir_commands;
+        effective_dir = Some(dir);
+    } else {
+        effective_commands = &commands;
+        effective_dir = rule.dir.as_deref();
+    }
+
+    let mut run_err: Option<anyhow::Error> = None;
+    for cmd in effective_commands {
+        let effective: Vec<String> =
+            if rule.shell && rule.subdir.is_none() && rule.makedir.is_none() {
+                vec!["sh".to_string(), "-c".to_string(), cmd.join(" ")]
+            } else {
+                cmd.clone()
+            };
         ui.print_command(&effective);
-        let output = run_command(&effective, rule.dir.as_deref())?;
-        captured.extend_from_slice(&output);
+        match run_command(&effective, effective_dir) {
+            Ok(output) => captured.extend_from_slice(&output),
+            Err(e) => {
+                // Extract any output embedded in the error message and print it
+                // before surfacing the failure, so the user sees compiler errors.
+                let msg = e.to_string();
+                // run_command embeds output after the first newline.
+                if let Some(pos) = msg.find('\n') {
+                    let output_part = &msg[pos + 1..];
+                    if !output_part.is_empty() {
+                        captured.extend_from_slice(output_part.as_bytes());
+                    }
+                }
+                run_err = Some(e);
+                break;
+            }
+        }
+    }
+    // Always print whatever output we captured (including partial output on failure).
+    ui.print_output(&captured);
+    if let Some(e) = run_err {
+        ui.print_fail(&rule.target);
+        return Err(e);
     }
     ui.print_done(&rule.target, start.elapsed());
-    ui.print_output(&captured);
 
     // Parse depfile (if any) and discover additional inputs.
     let discovered: Vec<String> = match &rule.depfile {
