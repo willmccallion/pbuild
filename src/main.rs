@@ -30,6 +30,7 @@ struct Args {
     force: bool,
     watch: bool,
     detect: bool,
+    explain: bool,
     completion: Option<String>,
     log: Option<String>,
     profile: Option<String>,
@@ -61,6 +62,7 @@ Options:
   -p, --profile <name> Activate a named profile from [config.profiles.<name>]
   -w, --watch          Rebuild automatically when input files change
       --completion     Print shell completion script (fish, bash, or zsh)
+      --explain        Show fully-expanded commands and env for each target, then exit
   --                   Pass remaining arguments to the target command (or {{args}})
 
 Special targets:
@@ -109,6 +111,7 @@ fn parse_args() -> Result<Args> {
             "-f" | "--force" => args.force = true,
             "-w" | "--watch" => args.watch = true,
             "--detect" => args.detect = true,
+            "--explain" => args.explain = true,
             "--completion" => {
                 let val = raw.next().ok_or_else(|| {
                     anyhow::anyhow!("--completion requires a shell (fish, bash, zsh)")
@@ -152,6 +155,105 @@ fn remove_if_exists(path: &str) -> Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e).with_context(|| format!("failed to remove {path}")),
     }
+}
+
+fn cmd_explain(args: &Args) -> Result<()> {
+    let mut bf = load_build_file()?;
+    if let Some(p) = &args.profile {
+        apply_profile(&mut bf, p)?;
+    }
+    let rules = to_rules(&bf)?;
+
+    // Build plans for each requested target (or default).
+    let targets: Vec<_> = if args.targets.is_empty() {
+        vec![resolve_target(&bf, None)?]
+    } else {
+        args.targets
+            .iter()
+            .map(|t| resolve_target(&bf, Some(t)))
+            .collect::<Result<_>>()?
+    };
+
+    use pbuild::graph::build_plan;
+
+    for root in &targets {
+        let plan = build_plan(&rules, root).map_err(|e| anyhow::anyhow!("{e}"))?;
+        for rule in &plan {
+            println!("[{}]", rule.target);
+
+            if let Some(dir) = &rule.dir {
+                println!("  dir: {dir}");
+            }
+            if let Some(sub) = &rule.subdir {
+                println!("  subdir: {sub}  (runs pbuild or make)");
+            }
+            if let Some(mk) = &rule.makedir {
+                println!("  makedir: {mk}  (runs make)");
+            }
+
+            if !rule.env.is_empty() {
+                let mut sorted: Vec<_> = rule.env.iter().collect();
+                sorted.sort_by_key(|(k, _)| k.as_str());
+                println!("  env:");
+                for (k, v) in sorted {
+                    println!("    {k}={v}");
+                }
+            }
+
+            if let Some(timeout) = rule.max_time {
+                let secs = timeout.as_secs();
+                let limit_str = if secs % 3600 == 0 {
+                    format!("{}h", secs / 3600)
+                } else if secs % 60 == 0 {
+                    format!("{}m", secs / 60)
+                } else {
+                    format!("{secs}s")
+                };
+                println!("  max_time: {limit_str}");
+            }
+
+            if rule.retry > 0 {
+                println!("  retry: {} (up to {} attempts)", rule.retry, rule.retry + 1);
+            }
+
+            if let Some(pat) = &rule.for_each {
+                println!("  for_each: {pat}");
+            }
+
+            println!("  commands:");
+            for cmd in &rule.commands {
+                // Expand {{args}} placeholder for display.
+                let expanded: Vec<String> = cmd
+                    .iter()
+                    .flat_map(|tok| {
+                        if tok == "{{args}}" {
+                            if args.extra_args.is_empty() {
+                                vec!["[extra args here]".to_string()]
+                            } else {
+                                args.extra_args.clone()
+                            }
+                        } else {
+                            vec![tok.clone()]
+                        }
+                    })
+                    .collect();
+
+                if rule.shell {
+                    println!("    sh -c \"{}\"", expanded.join(" "));
+                } else {
+                    println!("    {}", expanded.join(" "));
+                }
+            }
+
+            if !rule.on_failure.is_empty() {
+                println!("  on_failure: {}", rule.on_failure.join(" "));
+            }
+
+            println!();
+        }
+    }
+
+    Ok(())
 }
 
 fn cmd_doctor(profile: Option<&str>) -> Result<()> {
@@ -2190,6 +2292,10 @@ fn run() -> Result<()> {
     if args.help {
         print_help();
         return Ok(());
+    }
+
+    if args.explain {
+        return cmd_explain(&args);
     }
 
     let first_target = args.targets.first().map(String::as_str);

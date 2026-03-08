@@ -819,3 +819,47 @@ fn doctor_fails_on_duplicate_output() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("same.o"), "got: {stdout}");
 }
+
+#[test]
+fn explain_shows_expanded_commands() {
+    let fx = Fixture::new();
+    fx.write(
+        "pbuild.toml",
+        r#"
+        [vars]
+        tool = "cargo"
+
+        [build]
+        type    = "task"
+        command = ["{{tool}}", "build", "--release"]
+        env     = { RUST_LOG = "debug" }
+        dir     = "subdir"
+        max_time = "5m"
+        retry   = 2
+    "#,
+    );
+
+    let out = fx.run_ok(&["--explain", "build"]);
+    assert!(out.contains("cargo"), "var not expanded: {out}");
+    assert!(out.contains("RUST_LOG"), "env not shown: {out}");
+    assert!(out.contains("subdir"), "dir not shown: {out}");
+    assert!(out.contains("5m"), "max_time not shown: {out}");
+    assert!(out.contains("retry"), "retry not shown: {out}");
+}
+
+#[test]
+fn explain_shows_shell_wrapping() {
+    let fx = Fixture::new();
+    fx.write(
+        "pbuild.toml",
+        r#"
+        [deploy]
+        type    = "task"
+        shell   = true
+        command = ["cp dist/* /tmp/out && echo done"]
+    "#,
+    );
+
+    let out = fx.run_ok(&["--explain", "deploy"]);
+    assert!(out.contains("sh -c"), "shell wrapping not shown: {out}");
+}
