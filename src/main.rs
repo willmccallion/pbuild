@@ -27,6 +27,7 @@ struct Args {
     help: bool,
     trust: bool,
     only: bool,
+    force: bool,
     watch: bool,
     detect: bool,
     completion: Option<String>,
@@ -54,6 +55,7 @@ Options:
   -l, --list           List all available targets and exit
   -h, --help           Print this help and exit
       --trust          Skip safety checks for dangerous commands (sudo, rm -rf, etc.)
+  -f, --force          Force rebuild, ignoring input cache
       --only           Build just the named target without running its dependencies
       --log <file>     Tee pbuild's output lines to a file (appends; no ANSI codes)
   -p, --profile <name> Activate a named profile from [config.profiles.<name>]
@@ -103,6 +105,7 @@ fn parse_args() -> Result<Args> {
             "-h" | "--help" => args.help = true,
             "--trust" => args.trust = true,
             "--only" => args.only = true,
+            "-f" | "--force" => args.force = true,
             "-w" | "--watch" => args.watch = true,
             "--detect" => args.detect = true,
             "--completion" => {
@@ -424,6 +427,7 @@ fn cmd_watch(args: &Args) -> Result<()> {
         env: bf.config.env.clone(),
         ui: bf.ui.clone(),
         extra_args: Vec::new(),
+        force: false,
     };
 
     let run_build = |cfg: &pbuild::engine::Config, plan: &[pbuild::types::Rule]| {
@@ -506,6 +510,7 @@ fn cmd_watch(args: &Args) -> Result<()> {
             env: bf.config.env.clone(),
             ui: bf.ui.clone(),
             extra_args: Vec::new(),
+            force: false,
         };
         run_build(&cfg, &plan);
     }
@@ -2136,6 +2141,7 @@ fn run() -> Result<()> {
         env: bf.config.env.clone(),
         ui,
         extra_args: args.extra_args.clone(),
+        force: args.force,
     };
 
     // Collect the set of targets to build. Multi-target: `pbuild fmt lint test`

@@ -31,6 +31,8 @@ pub struct Config {
     /// Suppress pbuild's own status lines (› start, $ cmd, ✓ done).
     /// Command output is still shown.
     pub quiet: bool,
+    /// Force rebuild, ignoring input cache.
+    pub force: bool,
 }
 
 impl Default for Config {
@@ -48,6 +50,7 @@ impl Default for Config {
             },
             extra_args: Vec::new(),
             quiet: false,
+            force: false,
         }
     }
 }
@@ -160,6 +163,10 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
         anyhow::bail!("{} rule(s) failed", failures.len());
     }
 
+    if timings.is_empty() && !cfg.quiet {
+        cfg.ui.print_up_to_date();
+    }
+
     // Print timing summary if more than one rule ran.
     if timings.len() > 1 {
         timings.sort_by(|a, b| b.1.cmp(&a.1));
@@ -208,7 +215,7 @@ fn run_rule(
         rule.deps.iter().any(|d| r.contains(d))
     };
 
-    if !file_dirty && !dep_rebuilt && !env_dirty {
+    if rule.cache && !cfg.force && !file_dirty && !dep_rebuilt && !env_dirty {
         if cfg.verbose {
             ui.print_skip(&rule.target);
         }
@@ -436,7 +443,7 @@ pub fn check_status(rules: &[Rule]) -> Result<Vec<(String, bool)>> {
                 .unwrap_or_default();
             rule.inputs.iter().cloned().chain(dep_inputs).collect()
         };
-        let dirty = any_dirty_lf(&lock_file, &all_inputs)?;
+        let dirty = !rule.cache || any_dirty_lf(&lock_file, &all_inputs)?;
         results.push((rule.target.to_string(), dirty));
     }
 

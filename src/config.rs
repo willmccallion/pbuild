@@ -202,6 +202,14 @@ pub struct RawRule {
     /// Pass stdin through to the process (for interactive programs like QEMU).
     #[serde(default)]
     pub tty: bool,
+    /// Whether to cache this rule's results. Default true.
+    /// Set `cache = false` to always re-run this rule.
+    #[serde(default = "default_true")]
+    pub cache: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn parse_ui_config(table: &mut toml::Table) -> Result<crate::ui::UiConfig> {
@@ -419,6 +427,7 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
                     (k.clone(), interpolate(&bf.vars, v, true))
                 }).collect(),
                 tty: raw.tty,
+                cache: raw.cache,
             })
         })
         .collect()

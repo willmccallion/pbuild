@@ -52,4 +52,7 @@ pub struct Rule {
     /// If true, connect stdin to the terminal (for interactive programs like QEMU).
     /// Implies streaming output. Only valid when the rule runs alone (wave size 1).
     pub tty: bool,
+    /// If false, skip dirty-checking and always run this rule.
+    /// Default is true. Set `cache = false` in pbuild.toml to always re-run.
+    pub cache: bool,
 }

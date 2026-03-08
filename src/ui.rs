@@ -84,6 +84,11 @@ impl UiConfig {
         self.log(&format!("– {target}"));
     }
 
+    /// `Nothing to do — all targets are up to date.`
+    pub fn print_up_to_date(&self) {
+        println!("{}", self.dim("Nothing to do — all targets are up to date."));
+    }
+
     /// `  → build  changed: src/main.rs`  (verbose, before a rule runs)
     pub fn print_dirty_reason(&self, target: &impl std::fmt::Display, reason: &str) {
         println!("  {} {target}  {}", self.yellow("→"), self.dim(reason));
