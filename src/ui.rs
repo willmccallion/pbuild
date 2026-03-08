@@ -130,17 +130,22 @@ impl UiConfig {
     }
 
     /// `    [42/1000] bench-uf50` — overwritten in place with `\r`.
+    /// Suppressed when stdout is not a TTY (piped output).
     pub fn print_progress(&self, target: &impl std::fmt::Display, current: usize, total: usize) {
+        if !std::io::stdout().is_terminal() {
+            return;
+        }
         let pct = current * 100 / total;
         let msg = format!("    {} {target}", self.dim(&format!("[{current}/{total}] {pct}%")));
-        // Use \r to overwrite the line in place.
         print!("\r{msg}");
         let _ = std::io::stdout().flush();
     }
 
-    /// Clear the progress line.
+    /// Clear the progress line. No-op when stdout is not a TTY.
     pub fn clear_progress(&self) {
-        // Overwrite with spaces and return to start of line.
+        if !std::io::stdout().is_terminal() {
+            return;
+        }
         print!("\r{}\r", " ".repeat(80));
         let _ = std::io::stdout().flush();
     }
