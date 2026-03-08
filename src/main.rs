@@ -31,6 +31,7 @@ struct Args {
     watch: bool,
     detect: bool,
     explain: bool,
+    version: bool,
     completion: Option<String>,
     log: Option<String>,
     profile: Option<String>,
@@ -55,6 +56,7 @@ Options:
   -v, --verbose        Print skipped rules
   -l, --list           List all available targets and exit
   -h, --help           Print this help and exit
+      --version        Print version and exit
       --trust          Skip safety checks for dangerous commands (sudo, rm -rf, etc.)
   -f, --force          Force rebuild, ignoring input cache
       --only           Build just the named target without running its dependencies
@@ -110,6 +112,7 @@ fn parse_args() -> Result<Args> {
             "-k" | "--keep-going" => args.keep_going = true,
             "-l" | "--list" => args.list = true,
             "-h" | "--help" => args.help = true,
+            "--version" => args.version = true,
             "--trust" => args.trust = true,
             "--only" => args.only = true,
             "-f" | "--force" => args.force = true,
@@ -581,6 +584,7 @@ complete -c pbuild -l detect           -d 'Auto-detect project type (use with in
 complete -c pbuild -l log              -d 'Tee output to a file' -r
 complete -c pbuild -s p -l profile    -d 'Activate a named profile' -x
 complete -c pbuild -l completion       -d 'Print completion script' -x -a 'fish bash zsh'
+complete -c pbuild -l version          -d 'Print version and exit'
 
 # Special subcommands
 complete -c pbuild -n '__fish_is_first_arg' -a 'init'   -d 'Write starter pbuild.toml'
@@ -619,7 +623,7 @@ _pbuild_complete() {
         COMPREPLY=($(compgen -W "
             -j --jobs -n --dry-run -q --quiet -k --keep-going -v --verbose
             -l --list -h --help -w --watch -p --profile
-            --trust --only --detect --log --completion
+            --trust --only --detect --log --completion --version
         " -- "$cur"))
         return
     fi
@@ -659,6 +663,7 @@ _pbuild() {
         '--log[Tee output to a file]:file:_files' \
         '(-p --profile)'{-p,--profile}'[Activate a named profile]:profile' \
         '--completion[Print completion script]:shell:(fish bash zsh)' \
+        '--version[Print version and exit]' \
         ':target:(init import add edit run retry status clean touch prune doctor why graph '"${targets[@]}"')'
 }
 
@@ -2384,6 +2389,13 @@ fn run() -> Result<()> {
 
     if args.help {
         print_help();
+        return Ok(());
+    }
+
+    if args.version {
+        let hash = env!("PBUILD_GIT_HASH");
+        let date = env!("PBUILD_BUILD_DATE");
+        println!("pbuild {hash} ({date})");
         return Ok(());
     }
 

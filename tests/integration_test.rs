@@ -1062,3 +1062,25 @@ command = ["false"]
         "sentinel should have run despite other failure: {stdout}"
     );
 }
+
+#[test]
+fn version_flag_prints_hash_and_date() {
+    let fx = Fixture::new();
+    // --version works without a pbuild.toml
+    let out = Command::new(pbuild_bin())
+        .arg("--version")
+        .current_dir(fx.dir.path())
+        .output()
+        .expect("failed to run pbuild");
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // Should print "pbuild <hash> (<date>)"
+    assert!(
+        stdout.starts_with("pbuild "),
+        "unexpected version output: {stdout}"
+    );
+    assert!(
+        stdout.contains('(') && stdout.contains(')'),
+        "expected date in parens: {stdout}"
+    );
+}
