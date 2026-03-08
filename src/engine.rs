@@ -35,7 +35,7 @@ impl Default for Config {
             verbose: false,
             keep_going: false,
             env: Vec::new(),
-            ui: UiConfig { color: None, prefix: None },
+            ui: UiConfig { color: None, prefix: None, log: None },
         }
     }
 }
@@ -214,7 +214,7 @@ fn run_rule(
             cmd.clone()
         };
         ui.print_command(&effective);
-        run_command(&effective)?;
+        run_command(&effective, rule.dir.as_deref())?;
     }
     ui.print_done(&rule.target, start.elapsed());
 
@@ -259,9 +259,35 @@ fn run_rule(
     Ok(())
 }
 
+/// Check dirty state for a plan without running anything.
+/// Returns `(target_name, would_rebuild)` for each rule in plan order.
+pub fn check_status(rules: &[Rule]) -> Result<Vec<(String, bool)>> {
+    let lf = hash::read_lock_file()?;
+    let lock_file = RwLock::new(lf);
+    let mut results = Vec::new();
+
+    for rule in rules {
+        let all_inputs: Vec<String> = {
+            let lf = lock_file.read().unwrap();
+            let dep_inputs = rule.depfile.as_deref()
+                .map(|_| hash::load_depfile_inputs(&lf, &rule.output))
+                .unwrap_or_default();
+            rule.inputs.iter().cloned().chain(dep_inputs).collect()
+        };
+        let dirty = any_dirty_lf(&lock_file, &all_inputs)?;
+        results.push((rule.target.to_string(), dirty));
+    }
+
+    Ok(results)
+}
+
 /// True if any of the given files are dirty relative to the lock file.
 /// No declared inputs → always run (returns true).
 fn any_dirty(lock_file: &RwLock<LockFile>, inputs: &[String]) -> Result<bool> {
+    any_dirty_lf(lock_file, inputs)
+}
+
+fn any_dirty_lf(lock_file: &RwLock<LockFile>, inputs: &[String]) -> Result<bool> {
     if inputs.is_empty() {
         return Ok(true);
     }

@@ -152,6 +152,8 @@ pub struct RawRule {
     /// If true, join each command and run it via `sh -c`.
     #[serde(default)]
     pub shell: bool,
+    /// Working directory for the command, relative to pbuild.toml.
+    pub dir: Option<String>,
     /// Short description shown in `--list` output.
     pub description: Option<String>,
     /// Group heading for `--list` output.
@@ -160,12 +162,12 @@ pub struct RawRule {
 
 fn parse_ui_config(table: &mut toml::Table) -> Result<crate::ui::UiConfig> {
     let Some(val) = table.remove("ui") else {
-        return Ok(crate::ui::UiConfig { color: None, prefix: None });
+        return Ok(crate::ui::UiConfig { color: None, prefix: None, log: None });
     };
     let t: toml::Table = val.try_into().context("invalid [ui] section")?;
     let color = t.get("color").and_then(|v| v.as_bool());
     let prefix = t.get("prefix").and_then(|v| v.as_str()).map(ToString::to_string);
-    Ok(crate::ui::UiConfig { color, prefix })
+    Ok(crate::ui::UiConfig { color, prefix, log: None })
 }
 
 /// Parse `pbuild.toml` from the current directory.
@@ -240,6 +242,7 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
                 depfile: raw.depfile.as_deref().map(|s| interpolate(&bf.vars, s, true)),
                 commands,
                 shell: raw.shell,
+                dir: raw.dir.as_deref().map(|s| interpolate(&bf.vars, s, true)),
                 description: raw.description.clone(),
                 group: raw.group.clone(),
             })

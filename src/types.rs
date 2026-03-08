@@ -36,6 +36,8 @@ pub struct Rule {
     /// If true, each command is joined and run via `sh -c "..."`.
     /// Enables shell features: globs, pipes, redirects, `&&`, etc.
     pub shell: bool,
+    /// Working directory for the command, relative to pbuild.toml.
+    pub dir: Option<String>,
     /// Short description shown in `--list` output.
     pub description: Option<String>,
     /// Group heading for `--list` output (e.g. "Build", "Quality").

@@ -43,10 +43,13 @@ pub fn write_lock_file(lf: &LockFile) -> io::Result<()> {
 }
 
 /// True if the file's current hash differs from the stored hash.
-/// A missing file or missing lock entry is always dirty.
+/// A missing file is always dirty. A missing lock entry with an existing file is also dirty.
 pub fn is_dirty(lf: &LockFile, path: &str) -> io::Result<bool> {
     let current = hash_file(path)?;
-    Ok(current.as_deref() != lf.get(path).map(String::as_str))
+    match current {
+        None => Ok(true), // file doesn't exist → always dirty
+        Some(h) => Ok(lf.get(path).map(String::as_str) != Some(h.as_str())),
+    }
 }
 
 /// Lock file key for an environment variable.

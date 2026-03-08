@@ -1,12 +1,13 @@
 use std::fs;
 use std::process::ExitCode;
+use std::sync::{Arc, Mutex};
 
 use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
 use pbuild::{
     config::{BuildFile, expand_inputs, load_build_file, resolve_target, to_rules},
-    engine::{Config, execute_plan},
+    engine::{check_status, Config, execute_plan},
     graph::build_plan,
     hash,
 };
@@ -22,6 +23,8 @@ struct Args {
     list: bool,
     help: bool,
     trust: bool,
+    only: bool,
+    log: Option<String>,
     target: Option<String>,
 }
 
@@ -40,9 +43,12 @@ Options:
   -l, --list           List all available targets and exit
   -h, --help           Print this help and exit
       --trust          Skip safety checks for dangerous commands (sudo, rm -rf, etc.)
+      --only           Build just the named target without running its dependencies
+      --log <file>     Tee pbuild's output lines to a file (appends; no ANSI codes)
 
 Special targets:
   init                 Write a starter pbuild.toml in the current directory
+  status [TARGET]      Show which targets are dirty (would rebuild)
   clean                Delete all rule outputs and .pbuild.lock
   why <TARGET>         Explain why a target would rebuild"
     );
@@ -60,6 +66,13 @@ fn parse_args() -> Result<Args> {
             "-l" | "--list" => args.list = true,
             "-h" | "--help" => args.help = true,
             "--trust" => args.trust = true,
+            "--only"  => args.only = true,
+            "--log" => {
+                let val = raw
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("--log requires a file path"))?;
+                args.log = Some(val);
+            }
             "-j" | "--jobs" => {
                 let val = raw
                     .next()
@@ -236,6 +249,24 @@ type        = "task"
 command     = ["echo", "replace me with your clean command"]
 "#;
 
+fn cmd_status(target: Option<&str>) -> Result<()> {
+    let bf = load_build_file()?;
+    let rules = to_rules(&bf)?;
+    let root = resolve_target(&bf, target)?;
+    let plan = build_plan(&rules, &root).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let statuses = check_status(&plan)?;
+
+    let col = statuses.iter().map(|(n, _)| n.len()).max().unwrap_or(0) + 2;
+    for (name, dirty) in &statuses {
+        if *dirty {
+            println!("  {name:<col$} dirty");
+        } else {
+            println!("  {name:<col$} clean");
+        }
+    }
+    Ok(())
+}
+
 fn cmd_clean() -> Result<()> {
     // Build file is optional — if absent we can still wipe the lock file.
     if let Ok(bf) = load_build_file() {
@@ -389,13 +420,17 @@ fn safety_warnings(rules: &[pbuild::types::Rule]) -> Vec<String> {
 }
 
 fn run() -> Result<()> {
-    // Detect `why` before full arg parsing — it takes its own positional argument.
+    // Detect `why` and `status` before full arg parsing — they take their own positional argument.
     let raw_argv: Vec<String> = std::env::args().skip(1).collect();
     if raw_argv.first().map(String::as_str) == Some("why") {
         let target = raw_argv
             .get(1)
             .ok_or_else(|| anyhow::anyhow!("usage: pbuild why <target>"))?;
         return cmd_why(target);
+    }
+    if raw_argv.first().map(String::as_str) == Some("status") {
+        let target = raw_argv.get(1).map(String::as_str);
+        return cmd_status(target);
     }
 
     let args = parse_args()?;
@@ -440,7 +475,19 @@ fn run() -> Result<()> {
     }
 
     let root = resolve_target(&bf, args.target.as_deref())?;
-    let plan = build_plan(&rules, &root).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let log_file = args.log.as_deref().map(|path| {
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .with_context(|| format!("failed to open log file: {path}"))
+    }).transpose()?;
+
+    let ui = pbuild::ui::UiConfig {
+        log: log_file.map(|f| Arc::new(Mutex::new(f))),
+        ..bf.ui.clone()
+    };
 
     let cfg = Config {
         jobs,
@@ -448,8 +495,20 @@ fn run() -> Result<()> {
         verbose: args.verbose,
         keep_going: args.keep_going,
         env: bf.config.env.clone(),
-        ui: bf.ui.clone(),
+        ui,
     };
+
+    let plan = if args.only {
+        // Run just the single target — no dependency resolution.
+        // Clear deps so the wave scheduler doesn't wait for them.
+        rules.into_iter()
+            .find(|r| r.target == root)
+            .map(|mut r| { r.deps.clear(); vec![r] })
+            .ok_or_else(|| anyhow::anyhow!("no rule for target: {root}"))?
+    } else {
+        build_plan(&rules, &root).map_err(|e| anyhow::anyhow!("{e}"))?
+    };
+
     execute_plan(&cfg, &plan)?;
 
     Ok(())
