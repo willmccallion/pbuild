@@ -123,6 +123,17 @@ impl UiConfig {
         self.log(&s);
     }
 
+    /// Timing summary — printed after a build when more than one rule ran.
+    pub fn print_timing_summary(&self, timings: &[(String, std::time::Duration)]) {
+        let col = timings.iter().map(|(n, _)| n.len()).max().unwrap_or(0) + 2;
+        println!();
+        for (name, elapsed) in timings {
+            let secs = elapsed.as_secs_f64();
+            let time_str = format!("{secs:.2}s");
+            println!("  {name:<col$}{}", self.dim(&time_str));
+        }
+    }
+
     /// Env-dirty notice.
     pub fn print_env_dirty(&self) {
         println!("{}", self.yellow("  env vars changed — rebuilding all"));

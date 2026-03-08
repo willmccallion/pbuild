@@ -82,6 +82,7 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
     let mut done: HashSet<Target> = HashSet::new();
     let mut remaining: Vec<&Rule> = rules.iter().collect();
     let mut failures: Vec<anyhow::Error> = Vec::new();
+    let mut timings: Vec<(String, std::time::Duration)> = Vec::new();
 
     while !remaining.is_empty() {
         // Collect the ready wave — skip rules whose deps failed.
@@ -99,7 +100,7 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
 
         // Run the wave in parallel (bounded by the thread pool).
         let ui = &cfg.ui;
-        let results: Vec<Result<()>> = pool.install(|| {
+        let results: Vec<Result<Option<std::time::Duration>>> = pool.install(|| {
             ready
                 .par_iter()
                 .map(|rule| run_rule(cfg, env_dirty, ui, &lock_file, &rebuilt, rule))
@@ -108,7 +109,11 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
 
         for (rule, res) in ready.iter().zip(results) {
             match res.with_context(|| format!("rule failed for target: {}", rule.target)) {
-                Ok(()) => {
+                Ok(Some(elapsed)) => {
+                    timings.push((rule.target.to_string(), elapsed));
+                    done.insert(rule.target.clone());
+                }
+                Ok(None) => {
                     done.insert(rule.target.clone());
                 }
                 Err(e) if cfg.keep_going => {
@@ -130,6 +135,12 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
         anyhow::bail!("{} rule(s) failed", failures.len());
     }
 
+    // Print timing summary if more than one rule ran.
+    if timings.len() > 1 {
+        timings.sort_by(|a, b| b.1.cmp(&a.1));
+        cfg.ui.print_timing_summary(&timings);
+    }
+
     // Persist env values so a future run can detect changes.
     if !cfg.env.is_empty() {
         let mut lf = lock_file.write().unwrap();
@@ -144,6 +155,7 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
     Ok(())
 }
 
+/// Returns the elapsed time if the rule ran, or `None` if it was skipped.
 fn run_rule(
     cfg: &Config,
     env_dirty: bool,
@@ -151,7 +163,7 @@ fn run_rule(
     lock_file: &RwLock<LockFile>,
     rebuilt: &Mutex<HashSet<Target>>,
     rule: &Rule,
-) -> Result<()> {
+) -> Result<Option<std::time::Duration>> {
     // Merge declared inputs with any previously discovered depfile inputs.
     let all_inputs: Vec<String> = {
         let lf = lock_file.read().unwrap();
@@ -173,7 +185,7 @@ fn run_rule(
         if cfg.verbose {
             ui.print_skip(&rule.target);
         }
-        return Ok(());
+        return Ok(None);
     }
 
     // Build the final command list, injecting -MF into the last command if
@@ -206,7 +218,7 @@ fn run_rule(
                 ui.print_dry_run(cmd);
             }
         }
-        return Ok(());
+        return Ok(None);
     }
 
     ui.print_start(&rule.target);
@@ -263,7 +275,7 @@ fn run_rule(
 
     rebuilt.lock().unwrap().insert(rule.target.clone());
 
-    Ok(())
+    Ok(Some(start.elapsed()))
 }
 
 /// Check dirty state for a plan without running anything.

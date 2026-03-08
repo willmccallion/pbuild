@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::IsTerminal as _;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
@@ -25,6 +26,7 @@ struct Args {
     trust: bool,
     only: bool,
     watch: bool,
+    completion: Option<String>,
     log: Option<String>,
     target: Option<String>,
 }
@@ -47,6 +49,7 @@ Options:
       --only           Build just the named target without running its dependencies
       --log <file>     Tee pbuild's output lines to a file (appends; no ANSI codes)
   -w, --watch          Rebuild automatically when input files change
+      --completion     Print shell completion script (fish, bash, or zsh)
 
 Special targets:
   init                 Write a starter pbuild.toml in the current directory
@@ -71,6 +74,12 @@ fn parse_args() -> Result<Args> {
             "--trust" => args.trust = true,
             "--only" => args.only = true,
             "-w" | "--watch" => args.watch = true,
+            "--completion" => {
+                let val = raw
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("--completion requires a shell (fish, bash, zsh)"))?;
+                args.completion = Some(val);
+            }
             "--log" => {
                 let val = raw
                     .next()
@@ -211,6 +220,111 @@ fn prompt(question: &str, default: &str) -> Result<String> {
         Ok(trimmed)
     }
 }
+
+fn cmd_completion(shell: &str) -> Result<()> {
+    match shell {
+        "fish" => print!("{}", COMPLETION_FISH),
+        "bash" => print!("{}", COMPLETION_BASH),
+        "zsh"  => print!("{}", COMPLETION_ZSH),
+        other  => anyhow::bail!("unknown shell `{other}` — supported: fish, bash, zsh"),
+    }
+    Ok(())
+}
+
+const COMPLETION_FISH: &str = r#"# pbuild fish completion
+# Install: pbuild --completion fish > ~/.config/fish/completions/pbuild.fish
+
+function __pbuild_targets
+    if test -f pbuild.toml
+        pbuild --list 2>/dev/null | string match -r '^\s+\S+' | string trim | string match -r '^\S+'
+    end
+end
+
+complete -c pbuild -f
+
+# Flags
+complete -c pbuild -s j -l jobs        -d 'Max parallel rules' -x
+complete -c pbuild -s n -l dry-run     -d 'Print commands without running'
+complete -c pbuild -s k -l keep-going  -d 'Keep building after a failure'
+complete -c pbuild -s v -l verbose     -d 'Print skipped rules'
+complete -c pbuild -s l -l list        -d 'List all targets'
+complete -c pbuild -s h -l help        -d 'Print help'
+complete -c pbuild -s w -l watch       -d 'Rebuild on file changes'
+complete -c pbuild -l trust            -d 'Skip safety checks'
+complete -c pbuild -l only             -d 'Build target without its deps'
+complete -c pbuild -l log              -d 'Tee output to a file' -r
+complete -c pbuild -l completion       -d 'Print completion script' -x -a 'fish bash zsh'
+
+# Special subcommands
+complete -c pbuild -n '__fish_is_first_arg' -a 'init'   -d 'Write starter pbuild.toml'
+complete -c pbuild -n '__fish_is_first_arg' -a 'add'    -d 'Add a new rule'
+complete -c pbuild -n '__fish_is_first_arg' -a 'status' -d 'Show dirty/clean state'
+complete -c pbuild -n '__fish_is_first_arg' -a 'clean'  -d 'Delete outputs and lock file'
+complete -c pbuild -n '__fish_is_first_arg' -a 'why'    -d 'Explain why a target rebuilds'
+
+# Targets from pbuild.toml
+complete -c pbuild -n '__fish_is_first_arg' -a '(__pbuild_targets)'
+"#;
+
+const COMPLETION_BASH: &str = r#"# pbuild bash completion
+# Install: eval "$(pbuild --completion bash)"
+
+_pbuild_complete() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    case "$prev" in
+        -j|--jobs) return ;;
+        --log)     COMPREPLY=($(compgen -f -- "$cur")); return ;;
+        --completion) COMPREPLY=($(compgen -W "fish bash zsh" -- "$cur")); return ;;
+    esac
+
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "
+            -j --jobs -n --dry-run -k --keep-going -v --verbose
+            -l --list -h --help -w --watch
+            --trust --only --log --completion
+        " -- "$cur"))
+        return
+    fi
+
+    local targets=""
+    if [[ -f pbuild.toml ]]; then
+        targets=$(pbuild --list 2>/dev/null | grep -oP '^\s+\K\S+')
+    fi
+    COMPREPLY=($(compgen -W "init add status clean why $targets" -- "$cur"))
+}
+
+complete -F _pbuild_complete pbuild
+"#;
+
+const COMPLETION_ZSH: &str = r#"#compdef pbuild
+# pbuild zsh completion
+# Install: pbuild --completion zsh > "${fpath[1]}/_pbuild"
+
+_pbuild() {
+    local -a targets
+    if [[ -f pbuild.toml ]]; then
+        targets=(${(f)"$(pbuild --list 2>/dev/null | grep -oP '^\s+\K\S+')"})
+    fi
+
+    _arguments \
+        '(-j --jobs)'{-j,--jobs}'[Max parallel rules]:jobs' \
+        '(-n --dry-run)'{-n,--dry-run}'[Print commands without running]' \
+        '(-k --keep-going)'{-k,--keep-going}'[Keep building after failure]' \
+        '(-v --verbose)'{-v,--verbose}'[Print skipped rules]' \
+        '(-l --list)'{-l,--list}'[List all targets]' \
+        '(-h --help)'{-h,--help}'[Print help]' \
+        '(-w --watch)'{-w,--watch}'[Rebuild on file changes]' \
+        '--trust[Skip safety checks]' \
+        '--only[Build target without its deps]' \
+        '--log[Tee output to a file]:file:_files' \
+        '--completion[Print completion script]:shell:(fish bash zsh)' \
+        ':target:(init add status clean why '"${targets[@]}"')'
+}
+
+_pbuild
+"#;
 
 fn cmd_watch(args: &Args) -> Result<()> {
     use notify::{Event, RecursiveMode, Watcher};
@@ -467,6 +581,15 @@ fn cmd_clean() -> Result<()> {
 }
 
 fn print_list(bf: &BuildFile) {
+    // Try to load dirty state — silently skip if no lock file yet.
+    let dirty_map: std::collections::HashMap<String, bool> = {
+        let rules = pbuild::config::to_rules(bf).unwrap_or_default();
+        check_status(&rules)
+            .unwrap_or_default()
+            .into_iter()
+            .collect()
+    };
+
     // Collect entries, sorted by name within each group.
     // Group key: explicit group name, or "" (shown last as ungrouped).
     let mut groups: BTreeMap<&str, Vec<(&str, &pbuild::config::RawRule)>> = BTreeMap::new();
@@ -494,14 +617,25 @@ fn print_list(bf: &BuildFile) {
         }
     }
 
+    let is_tty = std::io::stdout().is_terminal();
     let print_entries = |entries: &Vec<(&str, &pbuild::config::RawRule)>| {
         for (name, raw) in entries {
             let is_default = bf.config.default.as_deref() == Some(name);
-            let suffix = if is_default { "  (default)" } else { "" };
-            if let Some(desc) = &raw.description {
-                println!("  {name:<col_width$}{desc}{suffix}");
+            let default_marker = if is_default { "  (default)" } else { "" };
+            // Only show dirty marker when stdout is a TTY — piped output (e.g.
+            // shell completions) must see clean target names only.
+            let state = if is_tty {
+                match dirty_map.get(*name) {
+                    Some(true) => "  \x1b[33m*\x1b[0m",
+                    _          => "   ",
+                }
             } else {
-                println!("  {name}{suffix}");
+                " "
+            };
+            if let Some(desc) = &raw.description {
+                println!("{state}  {name:<col_width$}{desc}{default_marker}");
+            } else {
+                println!("{state}  {name}{default_marker}");
             }
         }
     };
@@ -635,6 +769,13 @@ fn run() -> Result<()> {
             .get(1)
             .ok_or_else(|| anyhow::anyhow!("usage: pbuild add <name>"))?;
         return cmd_add(name);
+    }
+    // --completion doesn't need a pbuild.toml — detect it early.
+    if let Some(pos) = raw_argv.iter().position(|a| a == "--completion") {
+        let shell = raw_argv
+            .get(pos + 1)
+            .ok_or_else(|| anyhow::anyhow!("--completion requires a shell (fish, bash, zsh)"))?;
+        return cmd_completion(shell);
     }
 
     let args = parse_args()?;
