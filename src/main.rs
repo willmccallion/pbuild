@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
 use pbuild::{
-    config::{BuildFile, expand_inputs, load_build_file, resolve_target, to_rules},
+    config::{BuildFile, apply_profile, expand_inputs, load_build_file, resolve_target, to_rules},
     engine::{Config, check_status, execute_plan},
     graph::{build_plan, print_graph},
     hash,
@@ -30,6 +30,7 @@ struct Args {
     detect: bool,
     completion: Option<String>,
     log: Option<String>,
+    profile: Option<String>,
     target: Option<String>,
     /// Extra arguments passed after `--` on the command line.
     extra_args: Vec<String>,
@@ -52,6 +53,7 @@ Options:
       --trust          Skip safety checks for dangerous commands (sudo, rm -rf, etc.)
       --only           Build just the named target without running its dependencies
       --log <file>     Tee pbuild's output lines to a file (appends; no ANSI codes)
+  -p, --profile <name> Activate a named profile from [config.profiles.<name>]
   -w, --watch          Rebuild automatically when input files change
       --completion     Print shell completion script (fish, bash, or zsh)
   --                   Pass remaining arguments to the target command (or {{args}})
@@ -105,6 +107,12 @@ fn parse_args() -> Result<Args> {
                     .next()
                     .ok_or_else(|| anyhow::anyhow!("--log requires a file path"))?;
                 args.log = Some(val);
+            }
+            "--profile" | "-p" => {
+                let val = raw
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("--profile requires a name"))?;
+                args.profile = Some(val);
             }
             "-j" | "--jobs" => {
                 let val = raw
@@ -274,6 +282,7 @@ complete -c pbuild -l trust            -d 'Skip safety checks'
 complete -c pbuild -l only             -d 'Build target without its deps'
 complete -c pbuild -l detect           -d 'Auto-detect project type (use with init)'
 complete -c pbuild -l log              -d 'Tee output to a file' -r
+complete -c pbuild -s p -l profile    -d 'Activate a named profile' -x
 complete -c pbuild -l completion       -d 'Print completion script' -x -a 'fish bash zsh'
 
 # Special subcommands
@@ -301,13 +310,14 @@ _pbuild_complete() {
     case "$prev" in
         -j|--jobs) return ;;
         --log)     COMPREPLY=($(compgen -f -- "$cur")); return ;;
+        -p|--profile) return ;;
         --completion) COMPREPLY=($(compgen -W "fish bash zsh" -- "$cur")); return ;;
     esac
 
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "
             -j --jobs -n --dry-run -k --keep-going -v --verbose
-            -l --list -h --help -w --watch
+            -l --list -h --help -w --watch -p --profile
             --trust --only --detect --log --completion
         " -- "$cur"))
         return
@@ -345,6 +355,7 @@ _pbuild() {
         '--only[Build target without its deps]' \
         '--detect[Auto-detect project type (use with init)]' \
         '--log[Tee output to a file]:file:_files' \
+        '(-p --profile)'{-p,--profile}'[Activate a named profile]:profile' \
         '--completion[Print completion script]:shell:(fish bash zsh)' \
         ':target:(init import add edit run status clean why graph '"${targets[@]}"')'
 }
@@ -1645,7 +1656,11 @@ fn run() -> Result<()> {
         return cmd_init(args.detect);
     }
 
-    let bf = load_build_file()?;
+    let mut bf = load_build_file()?;
+
+    if let Some(profile) = &args.profile {
+        apply_profile(&mut bf, profile)?;
+    }
 
     if args.list {
         print_list(&bf);

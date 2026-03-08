@@ -75,6 +75,35 @@ pub struct BuildConfig {
     /// Equivalent to passing `--trust` on the CLI.
     #[serde(default)]
     pub trust: bool,
+    /// Named profiles that can be activated with `--profile <name>`.
+    #[serde(default)]
+    pub profiles: HashMap<String, Profile>,
+}
+
+/// A named profile — activated with `--profile <name>`.
+///
+/// Profile values are merged on top of `[config]` and `[vars]`:
+/// - `jobs`, `default`, `trust`: replace the base value when set.
+/// - `env`: appended to the base list.
+/// - `vars`: merged into `[vars]`, with profile values taking precedence.
+///
+/// ```toml
+/// [config.profiles.ci]
+/// jobs = 1
+/// vars = { cargo = "cargo +stable" }
+/// env  = ["CI"]
+/// ```
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct Profile {
+    pub default: Option<String>,
+    pub jobs: Option<usize>,
+    #[serde(default)]
+    pub env: Vec<String>,
+    #[serde(default)]
+    pub trust: bool,
+    /// Var overrides merged into `[vars]` (profile wins on conflict).
+    #[serde(default)]
+    pub vars: HashMap<String, String>,
 }
 
 /// Substitute `{{name}}` placeholders in `s`.
@@ -258,6 +287,35 @@ fn which_exists(name: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|path_var| {
         std::env::split_paths(&path_var).any(|dir| dir.join(name).is_file())
     })
+}
+
+/// Merge a named profile into a `BuildFile` in place.
+///
+/// Returns an error if the profile name is not found.
+pub fn apply_profile(bf: &mut BuildFile, name: &str) -> Result<()> {
+    let profile = bf
+        .config
+        .profiles
+        .get(name)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("no profile named `{name}`"))?;
+
+    if let Some(j) = profile.jobs {
+        bf.config.jobs = Some(j);
+    }
+    if let Some(d) = profile.default {
+        bf.config.default = Some(d);
+    }
+    if profile.trust {
+        bf.config.trust = true;
+    }
+    bf.config.env.extend(profile.env);
+    // Profile vars win over base vars.
+    for (k, v) in profile.vars {
+        bf.vars.insert(k, v);
+    }
+
+    Ok(())
 }
 
 /// Parse `pbuild.toml` from the current directory.
