@@ -191,6 +191,10 @@ pub struct RawRule {
     pub description: Option<String>,
     /// Group heading for `--list` output.
     pub group: Option<String>,
+    /// Environment variables set only for this rule's commands.
+    /// Example: `env = {"CC" = "clang", "CFLAGS" = "-O2"}`
+    #[serde(default)]
+    pub env: HashMap<String, String>,
 }
 
 fn parse_ui_config(table: &mut toml::Table) -> Result<crate::ui::UiConfig> {
@@ -404,6 +408,9 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
                     .map(|s| interpolate(&bf.vars, s, true)),
                 description: raw.description.clone(),
                 group: raw.group.clone(),
+                env: raw.env.iter().map(|(k, v)| {
+                    (k.clone(), interpolate(&bf.vars, v, true))
+                }).collect(),
             })
         })
         .collect()

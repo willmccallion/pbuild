@@ -67,6 +67,8 @@ Special targets:
   run <TARGET>         Alias for pbuild <TARGET> (explicit subcommand form)
   status [TARGET]      Show which targets are dirty (would rebuild)
   clean                Delete all rule outputs and .pbuild.lock
+  clean <TARGET>       Delete one target's output and its lock entries
+  touch <TARGET>       Hash inputs/output now — mark target clean without building
   why <TARGET>         Explain why a target would rebuild
   graph [TARGET]       Print the dependency graph for a target"
     );
@@ -293,6 +295,7 @@ complete -c pbuild -n '__fish_is_first_arg' -a 'edit'   -d 'Open pbuild.toml at 
 complete -c pbuild -n '__fish_is_first_arg' -a 'run'    -d 'Build a target (explicit subcommand)'
 complete -c pbuild -n '__fish_is_first_arg' -a 'status' -d 'Show dirty/clean state'
 complete -c pbuild -n '__fish_is_first_arg' -a 'clean'  -d 'Delete outputs and lock file'
+complete -c pbuild -n '__fish_is_first_arg' -a 'touch'  -d 'Mark target clean without building'
 complete -c pbuild -n '__fish_is_first_arg' -a 'why'    -d 'Explain why a target rebuilds'
 complete -c pbuild -n '__fish_is_first_arg' -a 'graph'  -d 'Print dependency graph'
 
@@ -327,7 +330,7 @@ _pbuild_complete() {
     if [[ -f pbuild.toml ]]; then
         targets=$(pbuild --list 2>/dev/null | grep -oP '^\s+\K\S+')
     fi
-    COMPREPLY=($(compgen -W "init import add edit run status clean why graph $targets" -- "$cur"))
+    COMPREPLY=($(compgen -W "init import add edit run status clean touch why graph $targets" -- "$cur"))
 }
 
 complete -F _pbuild_complete pbuild
@@ -357,7 +360,7 @@ _pbuild() {
         '--log[Tee output to a file]:file:_files' \
         '(-p --profile)'{-p,--profile}'[Activate a named profile]:profile' \
         '--completion[Print completion script]:shell:(fish bash zsh)' \
-        ':target:(init import add edit run status clean why graph '"${targets[@]}"')'
+        ':target:(init import add edit run status clean touch why graph '"${targets[@]}"')'
 }
 
 _pbuild
@@ -1034,6 +1037,60 @@ fn cmd_clean() -> Result<()> {
     remove_if_exists(".pbuild.lock")
 }
 
+/// Remove a single target's output file and its lock file entries.
+fn cmd_clean_target(target_name: &str) -> Result<()> {
+    let bf = load_build_file()?;
+    let raw = bf
+        .rules
+        .get(target_name)
+        .ok_or_else(|| anyhow::anyhow!("no rule for target: {target_name}"))?;
+
+    if !raw.output.is_empty() {
+        remove_if_exists(&raw.output)?;
+    }
+
+    let mut lf = hash::read_lock_file()?;
+    let inputs = expand_inputs(&raw.inputs)?;
+    hash::remove_rule_entries(&mut lf, &inputs, &raw.output);
+    hash::write_lock_file(&lf).context("failed to write lock file")?;
+    println!("cleaned {target_name}");
+    Ok(())
+}
+
+/// Hash a target's inputs and output right now and store in the lock file,
+/// marking it clean without running its command.
+fn cmd_touch(target_name: &str) -> Result<()> {
+    let bf = load_build_file()?;
+    let raw = bf
+        .rules
+        .get(target_name)
+        .ok_or_else(|| anyhow::anyhow!("no rule for target: {target_name}"))?;
+
+    let inputs = expand_inputs(&raw.inputs)?;
+    let mut lf = hash::read_lock_file()?;
+
+    let paths: Vec<&str> = inputs
+        .iter()
+        .map(String::as_str)
+        .chain(std::iter::once(raw.output.as_str()).filter(|s| !s.is_empty()))
+        .collect();
+
+    let mut touched = 0usize;
+    for path in paths {
+        match hash::hash_file(path)? {
+            Some(h) => {
+                lf.insert(path.to_string(), h);
+                touched += 1;
+            }
+            None => eprintln!("pbuild touch: {path}: file not found, skipping"),
+        }
+    }
+
+    hash::write_lock_file(&lf).context("failed to write lock file")?;
+    println!("touched {target_name} ({touched} file(s) hashed)");
+    Ok(())
+}
+
 fn print_list(bf: &BuildFile) {
     // Try to load dirty state — silently skip if no lock file yet.
     let dirty_map: std::collections::HashMap<String, bool> = {
@@ -1628,6 +1685,20 @@ fn run() -> Result<()> {
     if raw_argv.first().map(String::as_str) == Some("edit") {
         let target = raw_argv.get(1).map(String::as_str);
         return cmd_edit(target);
+    }
+    // `pbuild clean <target>` — clean just one target.
+    // `pbuild clean` (no arg) — handled later via args.target == "clean".
+    if raw_argv.first().map(String::as_str) == Some("clean") {
+        if let Some(target) = raw_argv.get(1) {
+            return cmd_clean_target(target);
+        }
+        // Fall through to the normal clean path.
+    }
+    if raw_argv.first().map(String::as_str) == Some("touch") {
+        let target = raw_argv
+            .get(1)
+            .ok_or_else(|| anyhow::anyhow!("usage: pbuild touch <target>"))?;
+        return cmd_touch(target);
     }
     if raw_argv.first().map(String::as_str) == Some("graph") {
         let target = raw_argv.get(1).map(String::as_str);

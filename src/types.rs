@@ -47,4 +47,6 @@ pub struct Rule {
     pub description: Option<String>,
     /// Group heading for `--list` output (e.g. "Build", "Quality").
     pub group: Option<String>,
+    /// Environment variables set for this rule's commands only.
+    pub env: std::collections::HashMap<String, String>,
 }

@@ -18,6 +18,7 @@ fn mk_task(target: Target, deps: Vec<Target>, command: Vec<&str>) -> Rule {
         makedir: None,
         description: None,
         group: None,
+        env: std::collections::HashMap::new(),
     }
 }
 
@@ -71,6 +72,7 @@ fn execution_order_respects_dependencies() {
             makedir: None,
             description: None,
             group: None,
+            env: std::collections::HashMap::new(),
         },
         Rule {
             target: b.clone(),
@@ -85,6 +87,7 @@ fn execution_order_respects_dependencies() {
             makedir: None,
             description: None,
             group: None,
+            env: std::collections::HashMap::new(),
         },
         Rule {
             target: c.clone(),
@@ -99,6 +102,7 @@ fn execution_order_respects_dependencies() {
             makedir: None,
             description: None,
             group: None,
+            env: std::collections::HashMap::new(),
         },
     ];
 

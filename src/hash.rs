@@ -94,6 +94,17 @@ pub fn env_stored_value<'a>(lf: &'a LockFile, var: &str) -> Option<&'a str> {
     lf.get(&env_key(var)).map(String::as_str)
 }
 
+/// Remove all lock file entries associated with a rule output (hashes + depfile inputs).
+pub fn remove_rule_entries(lf: &mut LockFile, inputs: &[String], output: &str) {
+    for path in inputs {
+        lf.remove(path);
+    }
+    if !output.is_empty() {
+        lf.remove(output);
+        lf.remove(&depfile_key(output));
+    }
+}
+
 fn parse_lock_file(s: &str) -> LockFile {
     s.lines()
         .filter_map(|line| {

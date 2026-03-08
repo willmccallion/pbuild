@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::process::{Command, Output, Stdio};
 
@@ -6,7 +7,8 @@ use anyhow::{Result, bail};
 /// Run a command and capture its stdout+stderr combined into a single buffer.
 /// Returns the captured bytes and an error if the command exits non-zero.
 /// `dir` sets the working directory; `None` inherits the current directory.
-pub fn run_command(argv: &[String], dir: Option<&str>) -> Result<Vec<u8>> {
+/// `env` sets extra environment variables for this invocation only.
+pub fn run_command(argv: &[String], dir: Option<&str>, env: &HashMap<String, String>) -> Result<Vec<u8>> {
     let (program, rest) = match argv {
         [] => return Ok(Vec::new()),
         [program, rest @ ..] => (program, rest),
@@ -17,6 +19,10 @@ pub fn run_command(argv: &[String], dir: Option<&str>) -> Result<Vec<u8>> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
 
     if let Some(d) = dir {
         cmd.current_dir(d);
@@ -51,7 +57,8 @@ pub fn run_command(argv: &[String], dir: Option<&str>) -> Result<Vec<u8>> {
 /// Run a command, streaming stdout+stderr directly to the terminal in real time.
 /// Returns an error if the command exits non-zero; the output has already been
 /// printed so the caller does not need to display it again.
-pub fn run_command_streaming(argv: &[String], dir: Option<&str>) -> Result<()> {
+/// `env` sets extra environment variables for this invocation only.
+pub fn run_command_streaming(argv: &[String], dir: Option<&str>, env: &HashMap<String, String>) -> Result<()> {
     let (program, rest) = match argv {
         [] => return Ok(()),
         [program, rest @ ..] => (program, rest),
@@ -62,6 +69,10 @@ pub fn run_command_streaming(argv: &[String], dir: Option<&str>) -> Result<()> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
 
     if let Some(d) = dir {
         cmd.current_dir(d);

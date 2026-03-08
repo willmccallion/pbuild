@@ -307,12 +307,12 @@ fn run_rule(
         if streaming && !cfg.dry_run {
             // Single-rule wave: stream output directly to the terminal so the
             // user sees progress in real time instead of waiting for completion.
-            if let Err(e) = run_command_streaming(&effective, effective_dir) {
+            if let Err(e) = run_command_streaming(&effective, effective_dir, &rule.env) {
                 run_err = Some(e);
                 break;
             }
         } else {
-            match run_command(&effective, effective_dir) {
+            match run_command(&effective, effective_dir, &rule.env) {
                 Ok(output) => captured.extend_from_slice(&output),
                 Err(e) => {
                     // Extract any output embedded in the error message and print it
