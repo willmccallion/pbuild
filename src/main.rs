@@ -1493,7 +1493,11 @@ fn cmd_import(makefile_path: &str) -> Result<()> {
             let _ = writeln!(out, "deps    = [{dep_list}]");
         }
 
-        if recipe.is_empty() {
+        if recipe.is_empty() && !rule_deps.is_empty() {
+            // Aggregate target: deps but no recipe — runs deps then exits cleanly.
+            out.push_str("command = [\"true\"]\n");
+        } else if recipe.is_empty() {
+            // Stub target: no deps, no recipe — needs manual filling.
             out.push_str("# no commands — add a command field\n");
             out.push_str("command = [\"echo\", \"TODO\"]\n");
         } else if recipe.len() == 1 {
