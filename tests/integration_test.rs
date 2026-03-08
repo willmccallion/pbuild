@@ -1010,3 +1010,55 @@ command = ["true"]
     let out = fx.run(&["nonexistent_target"]);
     assert_eq!(out.status.code(), Some(2));
 }
+
+#[test]
+fn keep_going_in_config_runs_independent_targets_after_failure() {
+    let fx = Fixture::new();
+    fx.write(
+        "pbuild.toml",
+        r#"
+[config]
+keep_going = true
+
+["sentinel"]
+type = "task"
+command = ["sh", "-c", "echo sentinel_ran"]
+
+["fail"]
+type = "task"
+command = ["false"]
+"#,
+    );
+    // Build both targets; "fail" fails but "sentinel" should still run.
+    let out = fx.run(&["sentinel", "fail"]);
+    assert!(!out.status.success(), "expected overall failure");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("sentinel_ran"),
+        "sentinel should have run despite other failure: {stdout}"
+    );
+}
+
+#[test]
+fn keep_going_flag_runs_independent_targets_after_failure() {
+    let fx = Fixture::new();
+    fx.write(
+        "pbuild.toml",
+        r#"
+["sentinel"]
+type = "task"
+command = ["sh", "-c", "echo sentinel_ran"]
+
+["fail"]
+type = "task"
+command = ["false"]
+"#,
+    );
+    let out = fx.run(&["-k", "sentinel", "fail"]);
+    assert!(!out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("sentinel_ran"),
+        "sentinel should have run despite other failure: {stdout}"
+    );
+}

@@ -86,6 +86,9 @@ pub struct BuildConfig {
     /// Equivalent to passing `--trust` on the CLI.
     #[serde(default)]
     pub trust: bool,
+    /// Continue building independent targets after a failure instead of stopping immediately.
+    #[serde(default)]
+    pub keep_going: bool,
     /// Default timeout for all rules. Overridden per-rule by `max_time`.
     /// Accepts "5m", "30s", "1h", or a plain integer (seconds).
     pub max_time: Option<String>,
