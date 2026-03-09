@@ -2511,7 +2511,14 @@ fn run() -> Result<()> {
     let first_target = args.targets.first().map(String::as_str);
 
     if first_target == Some("clean") {
-        return cmd_clean();
+        // Only use the built-in clean if the user hasn't defined their own [clean] rule.
+        let user_has_clean = load_build_file()
+            .ok()
+            .map(|bf| bf.rules.contains_key("clean"))
+            .unwrap_or(false);
+        if !user_has_clean {
+            return cmd_clean();
+        }
     }
 
     if first_target == Some("init") {
