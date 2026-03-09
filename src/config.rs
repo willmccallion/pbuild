@@ -519,7 +519,7 @@ pub fn to_rules(bf: &BuildFile) -> Result<Vec<Rule>> {
             for cmd in &raw.commands {
                 commands.push(interpolate_vec(&bf.vars, cmd, cmd_env));
             }
-            if commands.is_empty() {
+            if commands.is_empty() && raw.subdir.is_none() && raw.makedir.is_none() {
                 anyhow::bail!("rule `{name}` has no command");
             }
             Ok(Rule {
