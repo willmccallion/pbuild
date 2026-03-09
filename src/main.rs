@@ -1737,6 +1737,8 @@ fn cmd_touch(target_name: &str) -> Result<()> {
 }
 
 fn print_list(bf: &BuildFile) {
+    let ui = &bf.ui;
+
     // Try to load dirty state — silently skip if no lock file yet.
     let dirty_map: std::collections::HashMap<String, bool> = {
         let rules = pbuild::config::to_rules(bf).unwrap_or_default();
@@ -1777,32 +1779,62 @@ fn print_list(bf: &BuildFile) {
     let print_entries = |entries: &Vec<(&str, &pbuild::config::RawRule)>| {
         for (name, raw) in entries {
             let is_default = bf.config.default.as_deref() == Some(name);
-            let default_marker = if is_default { "  (default)" } else { "" };
             // Only show dirty marker when stdout is a TTY — piped output (e.g.
             // shell completions) must see clean target names only.
-            let state = if is_tty {
-                match dirty_map.get(*name) {
-                    Some(true) => "  \x1b[33m*\x1b[0m",
-                    _ => "   ",
+            let dirty = if is_tty {
+                matches!(dirty_map.get(*name), Some(true))
+            } else {
+                false
+            };
+
+            if is_tty {
+                let pad = col_width.saturating_sub(name.len());
+                let name_s = if is_default {
+                    format!("{}", ui.bold(name))
+                } else {
+                    name.to_string()
+                };
+                let dirty_col = if dirty {
+                    format!("{}  ", ui.c("\x1b[38;5;130m", "~"))
+                } else {
+                    "   ".to_string()
+                };
+                if let Some(desc) = &raw.description {
+                    println!("  {name_s}{:pad$}{}{}", "", dirty_col, ui.dim(desc));
+                } else {
+                    println!("  {name_s}");
                 }
             } else {
-                " "
-            };
-            if let Some(desc) = &raw.description {
-                println!("{state}  {name:<col_width$}{desc}{default_marker}");
-            } else {
-                println!("{state}  {name}{default_marker}");
+                // Plain output for piped/non-TTY.
+                let default_marker = if is_default { "  (default)" } else { "" };
+                if let Some(desc) = &raw.description {
+                    println!("  {name:<col_width$}{desc}{default_marker}");
+                } else {
+                    println!("  {name}{default_marker}");
+                }
             }
         }
     };
 
-    for (group, entries) in &named {
-        println!("{group}");
+    for (i, (group, entries)) in named.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        if is_tty {
+            println!("{}", ui.dim(group));
+        } else {
+            println!("{group}");
+        }
         print_entries(entries);
     }
     if let Some(entries) = ungrouped {
         if !named.is_empty() {
-            println!("Other");
+            println!();
+            if is_tty {
+                println!("{}", ui.dim("Other"));
+            } else {
+                println!("Other");
+            }
         }
         print_entries(entries);
     }
@@ -2492,7 +2524,7 @@ fn run() -> Result<()> {
         apply_profile(&mut bf, profile).map_err(config_err)?;
     }
 
-    if args.list {
+    if args.list || args.targets.is_empty() && !args.watch && !args.dry_run {
         print_list(&bf);
         return Ok(());
     }

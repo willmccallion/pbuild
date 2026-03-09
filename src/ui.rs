@@ -38,7 +38,7 @@ impl UiConfig {
         self.prefix.as_deref().unwrap_or("›")
     }
 
-    fn c<'a>(&self, code: &'static str, s: &'a str) -> std::borrow::Cow<'a, str> {
+    pub fn c<'a>(&self, code: &'static str, s: &'a str) -> std::borrow::Cow<'a, str> {
         if self.colors() {
             format!("{code}{s}\x1b[0m").into()
         } else {
@@ -55,10 +55,10 @@ impl UiConfig {
     fn red<'a>(&self, s: &'a str) -> std::borrow::Cow<'a, str> {
         self.c("\x1b[31m", s)
     }
-    fn dim<'a>(&self, s: &'a str) -> std::borrow::Cow<'a, str> {
+    pub fn dim<'a>(&self, s: &'a str) -> std::borrow::Cow<'a, str> {
         self.c("\x1b[2m", s)
     }
-    fn bold<'a>(&self, s: &'a str) -> std::borrow::Cow<'a, str> {
+    pub fn bold<'a>(&self, s: &'a str) -> std::borrow::Cow<'a, str> {
         self.c("\x1b[1m", s)
     }
 
