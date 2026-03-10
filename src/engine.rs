@@ -133,9 +133,6 @@ pub fn execute_plan(cfg: &Config, rules: &[Rule]) -> Result<()> {
                     done.insert(rule.target.clone());
                 }
                 Err(e) if cfg.keep_going => {
-                    if !cfg.quiet {
-                        cfg.ui.print_fail(&rule.target);
-                    }
                     eprintln!("pbuild: {e}");
                     // Record the failed target for `pbuild retry`.
                     {
@@ -371,7 +368,7 @@ fn run_rule(
                     if is_timeout(&e) {
                         ui.print_timeout(&rule.target, rule.max_time.unwrap_or_default());
                     } else {
-                        ui.print_fail(&rule.target);
+                        ui.print_fail(&rule.target, start.elapsed());
                     }
                 }
                 return Err(e);
@@ -416,7 +413,7 @@ fn run_rule(
         if let Some(e) = last_err {
             run_on_failure(cfg, ui, rule);
             if !cfg.quiet {
-                ui.print_fail(&rule.target);
+                ui.print_fail(&rule.target, start.elapsed());
             }
             return Err(e);
         }

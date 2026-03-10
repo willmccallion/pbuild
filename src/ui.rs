@@ -186,15 +186,18 @@ impl UiConfig {
     }
 
     /// `  ✗ build`
-    pub fn print_fail(&self, target: &impl std::fmt::Display) {
+    pub fn print_fail(&self, target: &impl std::fmt::Display, elapsed: std::time::Duration) {
+        let secs = elapsed.as_secs_f64();
+        let time_str = format!("{secs:.2}s");
+        let time = self.dim(&time_str);
         if self.gha {
             self.gha_error(&format!("Rule `{target}` failed"));
         }
-        println!("  {} {target}", self.red("✗"));
-        self.log(&format!("  ✗ {target}"));
+        println!("  {} {target} {time}", self.red("✗"));
+        self.log(&format!("  ✗ {target}  {secs:.2}s"));
     }
 
-    /// `    ~ cleanup command`  — shown before running on_failure command.
+    /// `    ~ cleanup command`  — shown before running ``on_failure`` command.
     pub fn print_on_failure_cmd(&self, cmd: &[String]) {
         println!("    {} {}", self.dim("~"), self.dim(&cmd.join(" ")));
         self.log(&format!("    ~ {}", cmd.join(" ")));
