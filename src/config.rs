@@ -215,9 +215,9 @@ pub struct RawRule {
     /// Pass stdin through to the process (for interactive programs like QEMU).
     #[serde(default)]
     pub tty: bool,
-    /// Whether to cache this rule's results. Default true.
-    /// Set `cache = false` to always re-run this rule.
-    #[serde(default = "default_true")]
+    /// Whether to cache this rule's results. Default false (always re-run).
+    /// Set `cache = true` to skip when inputs are unchanged.
+    #[serde(default)]
     pub cache: bool,
     /// Glob pattern: run the rule once per matching file, substituting
     /// `{{file}}` in commands with each path. Timing is aggregated.
@@ -254,9 +254,6 @@ pub struct RawDownload {
     pub strip: u32,
 }
 
-fn default_true() -> bool {
-    true
-}
 
 /// Parse a duration string like "5m", "30s", "1h", "1h30m", or a plain integer (seconds).
 pub fn parse_duration(s: &str) -> anyhow::Result<std::time::Duration> {

@@ -77,8 +77,9 @@ impl UiConfig {
 
     /// `    $ cargo build --release`  — each command within a rule.
     pub fn print_command(&self, cmd: &[String]) {
-        println!("    {} {}", self.dim("$"), self.dim(&cmd.join(" ")));
-        self.log(&format!("    $ {}", cmd.join(" ")));
+        let joined = cmd.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
+        println!("    {}", self.dim(&format!("$ {joined}")));
+        self.log(&format!("    $ {joined}"));
     }
 
     /// `– build`  (dim, verbose only)

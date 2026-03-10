@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use crate::depfile;
 use crate::download;
 use crate::hash::{self, LockFile, META_LAST_FAILED};
-use crate::process::{TimeoutError, run_command, run_command_streaming, run_command_tty};
+use crate::process::{TimeoutError, run_command, run_command_tty};
 use crate::types::{OutputMode, Rule, Target};
 use crate::ui::UiConfig;
 
@@ -522,15 +522,9 @@ fn execute_commands(
         if !cfg.quiet && !suppress_output {
             ui.print_command(&effective);
         }
-        if rule.tty {
+        if rule.tty || (streaming && !cfg.dry_run && !suppress_output) {
             if let Err(e) = run_command_tty(&effective, effective_dir, &rule.env, rule.max_time) {
                 flush_captured(cfg, ui, &captured);
-                return Some(e);
-            }
-        } else if streaming && !cfg.dry_run && !suppress_output {
-            if let Err(e) =
-                run_command_streaming(&effective, effective_dir, &rule.env, rule.max_time)
-            {
                 return Some(e);
             }
         } else {
